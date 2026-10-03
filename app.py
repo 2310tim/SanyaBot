@@ -12,14 +12,12 @@ DEEPSEEK_KEY = os.getenv("DEEPSEEK_API_KEY")
 if not DEEPSEEK_KEY:
     raise ValueError("DEEPSEEK_API_KEY не найден")
 
-# ===== КЛИЕНТ APIMIRA =====
 client = OpenAI(
     base_url="https://apimira.com/v1",
     api_key=DEEPSEEK_KEY,
 )
 
-# Режимы пользователей: {user_id: "ai"} или {user_id: None}
-user_modes = {}
+games = {}
 
 # ===== МЕНЮ =====
 def main_menu(username):
@@ -36,15 +34,8 @@ def games_menu():
     ]
     return InlineKeyboardMarkup(keyboard)
 
-def ai_menu():
-    keyboard = [
-        [InlineKeyboardButton("❌ Выйти из режима ИИ", callback_data="ai_exit")],
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
 # ===== START =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_modes.pop(update.effective_user.id, None)
     await update.message.reply_text(
         "👋 Здравствуйте!\n\nВыберите действие:",
         reply_markup=main_menu(context.bot.username)
@@ -60,18 +51,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
 
     if data == "ai":
-        user_modes[user_id] = "ai"
         await query.edit_message_text(
-            "🤖 Режим ИИ включён.\n\nНапиши любое сообщение — я отвечу.\n\n"
-            "Чтобы выйти — нажми кнопку ниже.",
-            reply_markup=ai_menu()
-        )
-
-    elif data == "ai_exit":
-        user_modes.pop(user_id, None)
-        await query.edit_message_text(
-            "👋 Вы вышли из режима ИИ.\n\nВыберите действие:",
-            reply_markup=main_menu(context.bot.username)
+            "🤖 Режим ИИ включён.\n\n"
+            "Ответь на это сообщение, чтобы я ответил.\n"
+            "Просто напиши что-нибудь в ответ на моё сообщение."
         )
 
     elif data == "games":
@@ -171,10 +154,11 @@ async def cubs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===== ТЕКСТ =====
 async def text_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    text = update.message.text
+    message = update.message
+    text = message.text
 
-    # Если пользователь в режиме ИИ
-    if user_modes.get(user_id) == "ai":
+    # ИИ отвечает ТОЛЬКО если сообщение — ответ на сообщение бота
+    if message.reply_to_message and message.reply_to_message.from_user.id == context.bot.id:
         try:
             completion = client.chat.completions.create(
                 model="deepseek/deepseek-v4-flash",
@@ -184,13 +168,13 @@ async def text_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ],
             )
             answer = completion.choices[0].message.content
-            await update.message.reply_text(answer[:4096])
+            await message.reply_text(answer[:4096])
         except Exception as e:
             print(f"ОШИБКА ИИ: {e}")
-            await update.message.reply_text(f"Ошибка ИИ: {e}")
+            await message.reply_text(f"Ошибка ИИ: {e}")
         return
 
-    # Обычные команды
+    # Обычные команды (кубы)
     text_lower = text.lower()
     if text_lower in ["кубы", "кубики"]:
         await cubs_command(update, context)
