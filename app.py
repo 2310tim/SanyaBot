@@ -1,6 +1,4 @@
-from flask import Flask
 import os
-import random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
@@ -8,20 +6,10 @@ TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TOKEN:
     raise ValueError("Токен не найден")
 
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "Bot is running"
-
-@app.route('/health')
-def health():
-    return "OK", 200
-
 games = {}
 
 # ===== МЕНЮ =====
-def main_menu(user_id):
+def main_menu():
     keyboard = [
         [InlineKeyboardButton("🤖 Чат с ИИ", callback_data="ai")],
         [InlineKeyboardButton("🎮 Игры", callback_data="games")],
@@ -37,10 +25,9 @@ def games_menu():
 
 # ===== START =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
     await update.message.reply_text(
         "👋 Здравствуйте!\n\nВыберите действие:",
-        reply_markup=main_menu(user_id)
+        reply_markup=main_menu()
     )
 
 # ===== CALLBACK =====
@@ -68,7 +55,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.edit_message_text("🎮 Выберите игру:", reply_markup=games_menu())
 
-    # ===== КУБЫ =====
     elif data == "cubs_start":
         await query.edit_message_text(
             "🎲 Напишите /cubs в ответ на сообщение человека, чтобы вызвать его.\n"
@@ -85,6 +71,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_id == challenger:
             await query.answer("Нельзя играть с самим собой.", show_alert=True)
             return
+        import random
         roll1 = random.randint(1, 6)
         roll2 = random.randint(1, 6)
         if roll1 > roll2:
@@ -97,7 +84,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🎲 Дуэль кубов!\n\n{query.from_user.first_name}: {roll1}\nСоперник: {roll2}\n\n{result}"
         )
 
-    # ===== КРЕСТИКИ-НОЛИКИ =====
     elif data == "ttt_start":
         await query.edit_message_text(
             "❌⭕ Напишите /tictactoe в ответ на сообщение человека, чтобы вызвать его.\n"
@@ -115,6 +101,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("Нельзя играть с самим собой.", show_alert=True)
             return
 
+        import random
         game_id = str(random.randint(100000, 999999))
         games[game_id] = {
             "board": [" "] * 9,
@@ -266,20 +253,25 @@ async def text_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text in ["крестики", "нолики", "крестики-нолики"]:
         await tictactoe_command(update, context)
 
-# ===== ЗАПУСК =====
-def run_bot():
+# ===== ЗАПУСК (WEBHOOK) =====
+def main():
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("cubs", cubs_command))
     application.add_handler(CommandHandler("tictactoe", tictactoe_command))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_commands))
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+    PORT = int(os.environ.get("PORT", 8443))
+    WEBHOOK_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://sanyabot-gdx4.onrender.com")
+
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path="/webhook",
+        webhook_url=f"{WEBHOOK_URL}/webhook",
+        drop_pending_updates=True,
+    )
 
 if __name__ == "__main__":
-    import threading
-    threading.Thread(
-        target=lambda: app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False, use_reloader=False),
-        daemon=True
-    ).start()
-    run_bot()
+    main()
