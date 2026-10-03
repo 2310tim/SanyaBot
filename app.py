@@ -258,15 +258,22 @@ async def tictactoe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ])
         )
 
+# ===== ТЕКСТ БЕЗ СЛЭША =====
+async def text_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.lower()
+    if text in ["кубы", "кубики"]:
+        await cubs_command(update, context)
+    elif text in ["крестики", "нолики", "крестики-нолики"]:
+        await tictactoe_command(update, context)
+
 # ===== ЗАПУСК =====
 def run_bot():
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("cubs", cubs_command))
-    application.add_handler(CommandHandler("кубики", cubs_command))
     application.add_handler(CommandHandler("tictactoe", tictactoe_command))
-    application.add_handler(CommandHandler("крестики", tictactoe_command))
     application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_commands))
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
