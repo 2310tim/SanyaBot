@@ -20,7 +20,6 @@ def health():
     return "OK", 200
 
 bot = telebot.TeleBot(TOKEN)
-
 games = {}
 
 def main_menu():
@@ -83,11 +82,17 @@ def text_commands(message):
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback(call):
-    bot.answer_callback_query(call.id)  # <-- ОБЯЗАТЕЛЬНО, чтобы кнопки не грузились
+    bot.answer_callback_query(call.id)
     data = call.data
     chat_id = call.message.chat.id
 
-    if data.startswith("cubs_accept_"):
+    if data == "ai":
+        bot.send_message(chat_id, "🤖 Режим ИИ. Напишите сообщение, и я отвечу.\n\n(Функция в разработке)")
+
+    elif data == "games":
+        bot.send_message(chat_id, "🎮 Режим игр. Доступные игры:\n\n🎲 Кубы — /cubs\n❌⭕ Крестики-нолики — /tictactoe")
+
+    elif data.startswith("cubs_accept_"):
         parts = data.split("_")
         challenger = int(parts[2])
         target = int(parts[3])
@@ -138,7 +143,7 @@ def ttt_board(game_id):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("ttt_move_"))
 def ttt_move(call):
-    bot.answer_callback_query(call.id)  # <-- ТОЖЕ ДОБАВИЛ
+    bot.answer_callback_query(call.id)
     data = call.data
     parts = data.split("_")
     game_id = parts[2] + "_" + parts[3] + "_" + parts[4]
