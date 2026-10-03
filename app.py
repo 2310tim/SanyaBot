@@ -44,7 +44,6 @@ def is_abdul_trigger(text):
     for word in ABDUL_TRIGGERS:
         if word in lower:
             return True
-    # Также триггерим на негатив о доте
     if "дота" in lower and any(w in lower for w in ["говно", "хуйня", "плохая", "отстой", "умерла"]):
         return True
     return False
@@ -92,7 +91,7 @@ def ai_menu(chat):
     mode_icons = {"normal": "😊", "evil": "😈", "rude": "🤬", "abdul": "🐈"}
     mode_names = {"normal": "Обычный", "evil": "Злой", "rude": "Грубый", "abdul": "Абдул"}
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"{mode_icons[s['mode']]} Режим: {mode_names[s['mode']}", callback_data="ai_mode")],
+        [InlineKeyboardButton(f"{mode_icons[s['mode']]} Режим: {mode_names[s['mode']]}", callback_data="ai_mode")],
         [InlineKeyboardButton(f"{mat_icon} Маты", callback_data="ai_toggle_mat")],
         [InlineKeyboardButton(f"{emoji_icon} Смайлики", callback_data="ai_toggle_emoji")],
         [InlineKeyboardButton("🔙 Назад", callback_data="back_main")],
@@ -259,7 +258,6 @@ async def text_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if message.reply_to_message and message.reply_to_message.from_user.id == context.bot.id:
         s = get_settings(settings_key(chat))
 
-        # Режим Абдул триггерится на запретные слова
         if s["mode"] == "abdul" and is_abdul_trigger(text):
             s_copy = {"mode": "abdul", "mat": True, "emoji": True}
             prompt = build_prompt(s_copy)
