@@ -1,5 +1,4 @@
 import os
-import random
 from openai import OpenAI
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
@@ -17,22 +16,63 @@ client = OpenAI(
     api_key=DEEPSEEK_KEY,
 )
 
-games = {}
+# ===== НАСТРОЙКИ =====
+# Ключ: "private_{user_id}" для ЛС, "{chat_id}" для чата
+# Значение: {"mode": "normal"/"evil", "mat": True/False, "emoji": True/False}
+settings = {}
+
+def get_settings(key):
+    if key not in settings:
+        settings[key] = {"mode": "normal", "mat": False, "emoji": False}
+    return settings[key]
+
+def settings_key(chat):
+    if chat.type == "private":
+        return f"private_{chat.id}"
+    return str(chat.id)
+
+# ===== ПРОМПТ =====
+def build_prompt(s):
+    parts = []
+    if s["mode"] == "evil":
+        parts.append("Ты грубый, дерзкий, злой ИИ. Отвечай агрессивно и по делу.")
+    else:
+        parts.append("Ты дружелюбный и вежливый ИИ-помощник. Отвечай по делу.")
+    if s["mat"]:
+        parts.append("Разрешается использовать мат и грубые выражения.")
+    else:
+        parts.append("Не используй мат и грубые выражения.")
+    if s["emoji"]:
+        parts.append("Используй много смайликов и эмодзи в ответах.")
+    else:
+        parts.append("Не используй смайлики без необходимости.")
+    parts.append("Старайся уложиться в 350 символов.")
+    return " ".join(parts)
 
 # ===== МЕНЮ =====
 def main_menu(username):
-    keyboard = [
+    return InlineKeyboardMarkup([
         [InlineKeyboardButton("🤖 Чат с ИИ", callback_data="ai")],
         [InlineKeyboardButton("🎮 Игры", callback_data="games")],
         [InlineKeyboardButton("➕ Добавить бота в чат", url=f"https://t.me/{username}?startgroup=true")],
-    ]
-    return InlineKeyboardMarkup(keyboard)
+    ])
+
+def ai_menu(chat):
+    s = get_settings(settings_key(chat))
+    mat_icon = "✅" if s["mat"] else "❌"
+    emoji_icon = "✅" if s["emoji"] else "❌"
+    mode_icon = "😈" if s["mode"] == "evil" else "😊"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"{mode_icon} Режим: {s['mode']}", callback_data="ai_mode")],
+        [InlineKeyboardButton(f"{mat_icon} Маты", callback_data="ai_toggle_mat")],
+        [InlineKeyboardButton(f"{emoji_icon} Смайлики", callback_data="ai_toggle_emoji")],
+        [InlineKeyboardButton("🔙 Назад", callback_data="back_main")],
+    ])
 
 def games_menu():
-    keyboard = [
+    return InlineKeyboardMarkup([
         [InlineKeyboardButton("🎲 Кубы", callback_data="cubs_start")],
-    ]
-    return InlineKeyboardMarkup(keyboard)
+    ])
 
 # ===== START =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -41,24 +81,60 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=main_menu(context.bot.username)
     )
 
+# ===== /ai =====
+async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    await update.message.reply_text(
+        "🤖 Настройки ИИ:\n\n"
+        "Ответь на сообщение бота, чтобы он ответил через ИИ.",
+        reply_markup=ai_menu(chat)
+    )
+
 # ===== CALLBACK =====
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     print(f"CALLBACK: {query.data}")
     await query.answer()
     data = query.data
-    user_id = update.effective_user.id
-    chat_id = update.effective_chat.id
+    chat = update.effective_chat
+    key = settings_key(chat)
+    s = get_settings(key)
 
     if data == "ai":
         await query.edit_message_text(
-            "🤖 Режим ИИ включён.\n\n"
-            "Ответь на это сообщение, чтобы я ответил.\n"
-            "Просто напиши что-нибудь в ответ на моё сообщение."
+            "🤖 Настройки ИИ:",
+            reply_markup=ai_menu(chat)
+        )
+
+    elif data == "ai_mode":
+        s["mode"] = "evil" if s["mode"] == "normal" else "normal"
+        await query.edit_message_text(
+            f"Режим изменён: {'😈 Злой' if s['mode'] == 'evil' else '😊 Обычный'}",
+            reply_markup=ai_menu(chat)
+        )
+
+    elif data == "ai_toggle_mat":
+        s["mat"] = not s["mat"]
+        await query.edit_message_text(
+            f"Маты: {'включены ✅' if s['mat'] else 'выключены ❌'}",
+            reply_markup=ai_menu(chat)
+        )
+
+    elif data == "ai_toggle_emoji":
+        s["emoji"] = not s["emoji"]
+        await query.edit_message_text(
+            f"Смайлики: {'включены ✅' if s['emoji'] else 'выключены ❌'}",
+            reply_markup=ai_menu(chat)
+        )
+
+    elif data == "back_main":
+        await query.edit_message_text(
+            "👋 Выберите действие:",
+            reply_markup=main_menu(context.bot.username)
         )
 
     elif data == "games":
-        if update.effective_chat.type == "private":
+        if chat.type == "private":
             await query.edit_message_text(
                 "❌ Игры доступны только в чате!\n\nДобавь бота в чат.",
                 reply_markup=InlineKeyboardMarkup([
@@ -70,14 +146,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "cubs_start":
         await query.edit_message_text(
-            "🎲 Напишите /cubs в ответ на сообщение человека, чтобы вызвать его.\n"
-            "Или просто /cubs, чтобы вызвать всех в чате."
+            "🎲 Напишите /cubs в ответ на сообщение человека, чтобы вызвать его."
         )
 
     elif data.startswith("cubs_accept_"):
         parts = data.split("_")
         challenger_id = int(parts[2])
         target_id = int(parts[3])
+        user_id = update.effective_user.id
         if target_id != 0 and user_id != target_id:
             await query.answer("Этот вызов не для тебя.", show_alert=True)
             return
@@ -86,23 +162,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         try:
-            challenger_chat = await context.bot.get_chat(challenger_id)
-            opponent_chat = await context.bot.get_chat(user_id)
-            name1 = challenger_chat.first_name or "Игрок 1"
-            name2 = opponent_chat.first_name or "Игрок 2"
+            c1 = await context.bot.get_chat(challenger_id)
+            c2 = await context.bot.get_chat(user_id)
+            name1 = c1.first_name or "Игрок 1"
+            name2 = c2.first_name or "Игрок 2"
         except Exception:
             name1 = "Игрок 1"
             name2 = "Игрок 2"
 
         await query.edit_message_text("🎲 Кидаем кубики...")
 
-        dice1 = await context.bot.send_dice(chat_id=chat_id, emoji="🎲")
-        v1 = dice1.dice.value
-        await context.bot.send_message(chat_id, f"🎲 {name1} выпало: {v1}")
+        d1 = await context.bot.send_dice(chat_id=chat.id, emoji="🎲")
+        v1 = d1.dice.value
+        await context.bot.send_message(chat.id, f"🎲 {name1} выпало: {v1}")
 
-        dice2 = await context.bot.send_dice(chat_id=chat_id, emoji="🎲")
-        v2 = dice2.dice.value
-        await context.bot.send_message(chat_id, f"🎲 {name2} выпало: {v2}")
+        d2 = await context.bot.send_dice(chat_id=chat.id, emoji="🎲")
+        v2 = d2.dice.value
+        await context.bot.send_message(chat.id, f"🎲 {name2} выпало: {v2}")
 
         if v1 > v2:
             result = f"🏆 Победил {name1}!"
@@ -112,11 +188,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             result = "🤝 Ничья!"
 
         await context.bot.send_message(
-            chat_id,
-            f"🎲 **Результаты дуэли:**\n"
-            f"• {name1}: {v1}\n"
-            f"• {name2}: {v2}\n\n"
-            f"{result}",
+            chat.id,
+            f"🎲 **Результаты дуэли:**\n• {name1}: {v1}\n• {name2}: {v2}\n\n{result}",
             parse_mode="Markdown"
         )
 
@@ -124,7 +197,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cubs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == "private":
         await update.message.reply_text(
-            "❌ Игры доступны только в чате!\n\nДобавь бота в чат.",
+            "❌ Игры доступны только в чате!",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("➕ Добавить бота в чат", url=f"https://t.me/{context.bot.username}?startgroup=true")]
             ])
@@ -153,36 +226,39 @@ async def cubs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ===== ТЕКСТ =====
 async def text_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
     message = update.message
     text = message.text
+    chat = update.effective_chat
 
-    # ИИ отвечает ТОЛЬКО если сообщение — ответ на сообщение бота
+    # ИИ отвечает только на ответ боту
     if message.reply_to_message and message.reply_to_message.from_user.id == context.bot.id:
+        s = get_settings(settings_key(chat))
         try:
             completion = client.chat.completions.create(
                 model="deepseek/deepseek-v4-flash",
                 messages=[
-                    {"role": "system", "content": "Ты грубый, дерзкий, злой ИИ. Матерись, отвечай без цензуры, но по делу."},
+                    {"role": "system", "content": build_prompt(s)},
                     {"role": "user", "content": text}
                 ],
+                max_tokens=200,
             )
             answer = completion.choices[0].message.content
-            await message.reply_text(answer[:4096])
+            await message.reply_text(answer[:350])
         except Exception as e:
             print(f"ОШИБКА ИИ: {e}")
             await message.reply_text(f"Ошибка ИИ: {e}")
         return
 
-    # Обычные команды (кубы)
+    # Обычные команды
     text_lower = text.lower()
     if text_lower in ["кубы", "кубики"]:
         await cubs_command(update, context)
 
-# ===== ЗАПУСК (WEBHOOK) =====
+# ===== ЗАПУСК =====
 def main():
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("ai", ai_command))
     application.add_handler(CommandHandler("cubs", cubs_command))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_commands))
