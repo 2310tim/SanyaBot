@@ -21,7 +21,6 @@ def main_menu(username):
 def games_menu():
     keyboard = [
         [InlineKeyboardButton("🎲 Кубы", callback_data="cubs_start")],
-        [InlineKeyboardButton("❌⭕ Крестики-нолики", callback_data="ttt_start")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -71,112 +70,53 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_id == challenger:
             await query.answer("Нельзя играть с самим собой.", show_alert=True)
             return
-        roll1 = random.randint(1, 6)
-        roll2 = random.randint(1, 6)
-        if roll1 > roll2:
-            result = f"🏆 Победил {query.from_user.first_name}!"
-        elif roll2 > roll1:
-            result = f"🏆 Победил {query.from_user.first_name}!"
-        else:
-            result = "🤝 Ничья!"
+
         await query.edit_message_text(
-            f"🎲 Дуэль кубов!\n\n{query.from_user.first_name}: {roll1}\nСоперник: {roll2}\n\n{result}"
+            f"🎲 Дуэль кубов!\n\n{query.from_user.first_name}, кидай кубик!",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🎲 Кинуть кубик", callback_data=f"cubs_roll_{challenger}_{user_id}")]
+            ])
         )
 
-    elif data == "ttt_start":
-        await query.edit_message_text(
-            "❌⭕ Напишите /tictactoe в ответ на сообщение человека, чтобы вызвать его.\n"
-            "Или просто /tictactoe, чтобы вызвать всех в чате."
-        )
-
-    elif data.startswith("ttt_accept_"):
+    elif data.startswith("cubs_roll_"):
         parts = data.split("_")
         challenger = int(parts[2])
-        target = int(parts[3])
-        if target != 0 and user_id != target:
-            await query.answer("Этот вызов не для тебя.", show_alert=True)
-            return
-        if user_id == challenger:
-            await query.answer("Нельзя играть с самим собой.", show_alert=True)
+        opponent = int(parts[3])
+
+        if user_id not in [challenger, opponent]:
+            await query.answer("Ты не участник этой игры.", show_alert=True)
             return
 
-        game_id = str(random.randint(10, 99))
-        games[game_id] = {
-            "board": [" "] * 9,
-            "turn": challenger,
-            "player1": challenger,
-            "player2": user_id,
-            "chat_id": chat_id,
-            "message_id": query.message.message_id
-        }
+        # Отправляем кубик от имени бота
+        dice_msg = await context.bot.send_dice(chat_id=chat_id, emoji="🎲")
+        value = dice_msg.dice.value
 
-        await query.edit_message_text(
-            f"❌⭕ Игра началась!\n\nХод {query.from_user.first_name} (❌)",
-            reply_markup=ttt_board(game_id)
-        )
+        # Сохраняем результат
+        if "cubs_results" not in games:
+            games["cubs_results"] = {}
 
-    elif data.startswith("ttt_move_"):
-        try:
-            parts = data.split("_")
-            game_id = parts[2]
-            cell = int(parts[3])
-            print(f"TTT MOVE: game_id={game_id}, cell={cell}")
+        games["cubs_results"][user_id] = value
 
-            game = games.get(game_id)
-            if not game:
-                await query.answer("Игра не найдена.", show_alert=True)
-                return
-
-            if user_id != game["turn"]:
-                await query.answer("Сейчас не твой ход!", show_alert=True)
-                return
-
-            if game["board"][cell] != " ":
-                await query.answer("Клетка занята!", show_alert=True)
-                return
-
-            symbol = "❌" if user_id == game["player1"] else "⭕"
-            game["board"][cell] = symbol
-
-            if check_winner(game["board"]):
-                await query.edit_message_text(f"❌⭕ Игра окончена!\n\nПобедил {query.from_user.first_name}!")
-                del games[game_id]
-                return
-
-            if " " not in game["board"]:
-                await query.edit_message_text("❌⭕ Игра окончена!\n\nНичья!")
-                del games[game_id]
-                return
-
-            game["turn"] = game["player2"] if game["turn"] == game["player1"] else game["player1"]
-            await query.edit_message_reply_markup(reply_markup=ttt_board(game_id))
-            print(f"СООБЩЕНИЕ ОБНОВЛЕНО для игры {game_id}")
-
-        except Exception as e:
-            print(f"ОШИБКА TTT_MOVE: {e}")
-            await query.answer(f"Ошибка: {e}", show_alert=True)
-
-def ttt_board(game_id):
-    game = games.get(game_id)
-    if not game:
-        return None
-    board = game["board"]
-    keyboard = []
-    row = []
-    for i in range(9):
-        cell = board[i] if board[i] != " " else "⬜"
-        row.append(InlineKeyboardButton(cell, callback_data=f"ttt_move_{game_id}_{i}"))
-        if len(row) == 3:
-            keyboard.append(row)
-            row = []
-    return InlineKeyboardMarkup(keyboard)
-
-def check_winner(board):
-    wins = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]]
-    for combo in wins:
-        if board[combo[0]] == board[combo[1]] == board[combo[2]] != " ":
-            return True
-    return False
+        # Проверяем, оба ли кинули
+        if challenger in games["cubs_results"] and opponent in games["cubs_results"]:
+            v1 = games["cubs_results"][challenger]
+            v2 = games["cubs_results"][opponent]
+            if v1 > v2:
+                result = "🏆 Победил первый игрок!"
+            elif v2 > v1:
+                result = "🏆 Победил второй игрок!"
+            else:
+                result = "🤝 Ничья!"
+            await context.bot.send_message(
+                chat_id,
+                f"🎲 Результаты:\nИгрок 1: {v1}\nИгрок 2: {v2}\n\n{result}"
+            )
+            del games["cubs_results"]
+        else:
+            await context.bot.send_message(
+                chat_id,
+                f"🎲 Выпало: {value}\n\nЖдём второго игрока..."
+            )
 
 # ===== КОМАНДЫ =====
 async def cubs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -209,49 +149,16 @@ async def cubs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ])
         )
 
-async def tictactoe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.type == "private":
-        await update.message.reply_text(
-            "❌ Игры доступны только в чате!\n\nДобавь бота в чат.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("➕ Добавить бота в чат", url=f"https://t.me/{context.bot.username}?startgroup=true")]
-            ])
-        )
-        return
-    user_id = update.effective_user.id
-    message = update.message
-    if message.reply_to_message:
-        opponent = message.reply_to_message.from_user
-        if opponent.id == user_id:
-            await message.reply_text("Нельзя играть с самим собой.")
-            return
-        await message.reply_text(
-            f"❌⭕ {message.from_user.first_name} вызывает {opponent.first_name} на крестики-нолики!\n\n{opponent.first_name}, принимаешь вызов?",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Принять", callback_data=f"ttt_accept_{user_id}_{opponent.id}")]
-            ])
-        )
-    else:
-        await message.reply_text(
-            f"❌⭕ {message.from_user.first_name} вызывает всех на крестики-нолики!\n\nКто примет вызов?",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Принять", callback_data=f"ttt_accept_{user_id}_0")]
-            ])
-        )
-
 async def text_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.lower()
     if text in ["кубы", "кубики"]:
         await cubs_command(update, context)
-    elif text in ["крестики", "нолики", "крестики-нолики"]:
-        await tictactoe_command(update, context)
 
 # ===== ЗАПУСК (WEBHOOK) =====
 def main():
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("cubs", cubs_command))
-    application.add_handler(CommandHandler("tictactoe", tictactoe_command))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_commands))
 
