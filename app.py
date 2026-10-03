@@ -10,10 +10,11 @@ if not TOKEN:
 games = {}
 
 # ===== МЕНЮ =====
-def main_menu():
+def main_menu(username):
     keyboard = [
         [InlineKeyboardButton("🤖 Чат с ИИ", callback_data="ai")],
         [InlineKeyboardButton("🎮 Игры", callback_data="games")],
+        [InlineKeyboardButton("➕ Добавить бота в чат", url=f"https://t.me/{username}?startgroup=true")],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -28,28 +29,25 @@ def games_menu():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Здравствуйте!\n\nВыберите действие:",
-        reply_markup=main_menu()
+        reply_markup=main_menu(context.bot.username)
     )
 
 # ===== CALLBACK =====
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    print(f"CALLBACK ПОЛУЧЕН: {query.data}")
+    print(f"CALLBACK: {query.data}")
     await query.answer()
     data = query.data
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
 
     if data == "ai":
-        await query.edit_message_text(
-            "🤖 Режим ИИ. Напишите сообщение, и я отвечу.\n\n(Функция в разработке)"
-        )
+        await query.edit_message_text("🤖 Режим ИИ.\n\n(Функция в разработке)")
 
     elif data == "games":
         if update.effective_chat.type == "private":
             await query.edit_message_text(
-                "❌ Игры доступны только в чате!\n\n"
-                "Добавь бота в чат и играй с друзьями.",
+                "❌ Игры доступны только в чате!\n\nДобавь бота в чат.",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("➕ Добавить бота в чат", url=f"https://t.me/{context.bot.username}?startgroup=true")]
                 ])
@@ -102,7 +100,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("Нельзя играть с самим собой.", show_alert=True)
             return
 
-        game_id = str(random.randint(100000, 999999))
+        game_id = str(random.randint(10, 99))  # КОРОТКИЙ ID
         games[game_id] = {
             "board": [" "] * 9,
             "turn": challenger,
@@ -140,9 +138,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         game["board"][cell] = symbol
 
         if check_winner(game["board"]):
-            await query.edit_message_text(
-                f"❌⭕ Игра окончена!\n\nПобедил {query.from_user.first_name}!"
-            )
+            await query.edit_message_text(f"❌⭕ Игра окончена!\n\nПобедил {query.from_user.first_name}!")
             del games[game_id]
             return
 
@@ -152,7 +148,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         game["turn"] = game["player2"] if game["turn"] == game["player1"] else game["player1"]
-
         await query.edit_message_reply_markup(reply_markup=ttt_board(game_id))
 
 def ttt_board(game_id):
@@ -187,19 +182,15 @@ async def cubs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ])
         )
         return
-
-    chat_id = update.effective_chat.id
     user_id = update.effective_user.id
     message = update.message
-
     if message.reply_to_message:
         opponent = message.reply_to_message.from_user
         if opponent.id == user_id:
             await message.reply_text("Нельзя играть с самим собой.")
             return
         await message.reply_text(
-            f"🎲 {message.from_user.first_name} вызывает {opponent.first_name} на дуэль кубов!\n\n"
-            f"{opponent.first_name}, принимаешь вызов?",
+            f"🎲 {message.from_user.first_name} вызывает {opponent.first_name} на дуэль кубов!\n\n{opponent.first_name}, принимаешь вызов?",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("✅ Принять", callback_data=f"cubs_accept_{user_id}_{opponent.id}")]
             ])
@@ -221,19 +212,15 @@ async def tictactoe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ])
         )
         return
-
-    chat_id = update.effective_chat.id
     user_id = update.effective_user.id
     message = update.message
-
     if message.reply_to_message:
         opponent = message.reply_to_message.from_user
         if opponent.id == user_id:
             await message.reply_text("Нельзя играть с самим собой.")
             return
         await message.reply_text(
-            f"❌⭕ {message.from_user.first_name} вызывает {opponent.first_name} на крестики-нолики!\n\n"
-            f"{opponent.first_name}, принимаешь вызов?",
+            f"❌⭕ {message.from_user.first_name} вызывает {opponent.first_name} на крестики-нолики!\n\n{opponent.first_name}, принимаешь вызов?",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("✅ Принять", callback_data=f"ttt_accept_{user_id}_{opponent.id}")]
             ])
@@ -246,7 +233,6 @@ async def tictactoe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ])
         )
 
-# ===== ТЕКСТ БЕЗ СЛЭША =====
 async def text_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.lower()
     if text in ["кубы", "кубики"]:
