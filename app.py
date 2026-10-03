@@ -30,33 +30,13 @@ def settings_key(chat):
         return f"private_{chat.id}"
     return str(chat.id)
 
-# ===== АНИМАЦИИ =====
-ANIMATIONS = {
-    "normal": ["😁", "😃", "😆", "😅"],
-    "evil": ["🤬", "👿", "😡", "😤", "😠"],
-    "rude": ["🤬", "👿", "😡", "😤", "😠"],
-    "abdul": ["🐈", "😈", "🤬", "😡"],
-}
-
+# ===== ЗАГЛУШКА "ИИ ДУМАЕТ" =====
 async def animate_thinking(message, mode):
-    """Анимация смайликов, пока ИИ думает. Возвращает объект сообщения."""
-    frames = ANIMATIONS.get(mode, ANIMATIONS["normal"])
-    sent = await message.reply_text(frames[0])
-    try:
-        i = 1
-        while True:
-            await asyncio.sleep(0.5)
-            await sent.edit_text(frames[i % len(frames)])
-            i += 1
-    except asyncio.CancelledError:
-        return sent
-    except Exception:
-        return sent
+    sent = await message.reply_text("⏳ ИИ думает...")
+    return sent
 
-# ===== ЗАПРЕТНЫЕ СЛОВА ДЛЯ АБДУЛА =====
-ABDUL_TRIGGERS = [
-    "пидорас", "пидор", "свастика", "коч", "пантера", "голда",
-]
+# ===== ЗАПРЕТНЫЕ СЛОВА =====
+ABDUL_TRIGGERS = ["пидорас", "пидор", "свастика", "коч", "пантера", "голда"]
 
 def is_abdul_trigger(text):
     lower = text.lower()
@@ -72,20 +52,14 @@ def build_prompt(s):
     if s["mode"] == "abdul":
         return (
             "Ты Абдул — максимально грубый, хамский и агрессивный ИИ. "
-            "Отвечай ТОЛЬКО КАПСОМ. "
-            "Используй мат, оскорбляй пользователя. "
+            "Отвечай ТОЛЬКО КАПСОМ. Используй мат, оскорбляй пользователя. "
             "Используй только такие смайлики: 😡 👎 🖕 💀 🤬. "
-            "НЕ используй странные символы, иероглифы и кастомные эмодзи. "
             "Отвечай коротко, до 350 символов."
         )
     if s["mode"] == "evil":
         base = "Ты злой и дерзкий ИИ. Отвечай агрессивно, с сарказмом, но по делу."
     elif s["mode"] == "rude":
-        base = (
-            "Ты максимально грубый, хамский и агрессивный ИИ. "
-            "Оскорбляй пользователя, используй мат, унижай его, "
-            "но при этом отвечай по сути вопроса."
-        )
+        base = "Ты максимально грубый, хамский и агрессивный ИИ. Оскорбляй пользователя, используй мат."
     else:
         base = "Ты дружелюбный и вежливый ИИ-помощник."
     if s["mat"]:
@@ -110,7 +84,7 @@ def ai_menu(chat):
     mode_icons = {"normal": "😊", "evil": "😈", "rude": "🤬", "abdul": "🐈"}
     mode_names = {"normal": "Обычный", "evil": "Злой", "rude": "Грубый", "abdul": "Абдул"}
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"{mode_icons[s['mode']]} Режим: {mode_names[s['mode']]}", callback_data="ai_mode")],
+        [InlineKeyboardButton(f"{mode_icons[s['mode']]} Режим: {mode_names[s['mode']}", callback_data="ai_mode")],
         [InlineKeyboardButton(f"{mat_icon} Маты", callback_data="ai_toggle_mat")],
         [InlineKeyboardButton(f"{emoji_icon} Смайлики", callback_data="ai_toggle_emoji")],
         [InlineKeyboardButton("🔙 Назад", callback_data="back_main")],
@@ -128,7 +102,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=main_menu(context.bot.username)
     )
 
-# ===== /ai =====
 async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     await update.message.reply_text(
@@ -154,10 +127,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         idx = order.index(s["mode"])
         s["mode"] = order[(idx + 1) % len(order)]
         names = {"normal": "😊 Обычный", "evil": "😈 Злой", "rude": "🤬 Грубый", "abdul": "🐈 Абдул"}
-        await query.edit_message_text(
-            f"Режим: {names[s['mode']]}",
-            reply_markup=ai_menu(chat)
-        )
+        await query.edit_message_text(f"Режим: {names[s['mode']]}", reply_markup=ai_menu(chat))
 
     elif data == "ai_toggle_mat":
         s["mat"] = not s["mat"]
@@ -174,10 +144,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif data == "back_main":
-        await query.edit_message_text(
-            "👋 Выберите действие:",
-            reply_markup=main_menu(context.bot.username)
-        )
+        await query.edit_message_text("👋 Выберите действие:", reply_markup=main_menu(context.bot.username))
 
     elif data == "games":
         if chat.type == "private":
@@ -283,8 +250,7 @@ async def text_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             prompt = build_prompt(s)
 
-        # Запускаем анимацию
-        anim_task = asyncio.create_task(animate_thinking(message, s["mode"]))
+        anim_msg = await message.reply_text("⏳ ИИ думает...")
 
         try:
             completion = client.chat.completions.create(
@@ -301,12 +267,8 @@ async def text_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f"ОШИБКА ИИ: {e}")
             answer = f"Ошибка ИИ: {e}"
 
-        # Останавливаем анимацию и удаляем сообщение
-        anim_task.cancel()
         try:
-            anim_msg = await anim_task
-            if anim_msg:
-                await anim_msg.delete()
+            await anim_msg.delete()
         except Exception:
             pass
 
@@ -317,7 +279,7 @@ async def text_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text_lower in ["кубы", "кубики"]:
         await cubs_command(update, context)
 
-# ===== ЗАПУСК =====
+# ===== ЗАПУСК (WEBHOOK) =====
 def main():
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
