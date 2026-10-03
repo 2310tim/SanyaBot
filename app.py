@@ -17,8 +17,6 @@ client = OpenAI(
 )
 
 # ===== НАСТРОЙКИ =====
-# Ключ: "private_{user_id}" для ЛС, "{chat_id}" для чата
-# Значение: {"mode": "normal"/"evil", "mat": True/False, "emoji": True/False}
 settings = {}
 
 def get_settings(key):
@@ -31,23 +29,17 @@ def settings_key(chat):
         return f"private_{chat.id}"
     return str(chat.id)
 
-# ===== ПРОМПТ =====
 def build_prompt(s):
-    parts = []
     if s["mode"] == "evil":
-        parts.append("Ты грубый, дерзкий, злой ИИ. Отвечай агрессивно и по делу.")
+        base = "Ты грубый, дерзкий, злой ИИ. Отвечай агрессивно и по делу."
     else:
-        parts.append("Ты дружелюбный и вежливый ИИ-помощник. Отвечай по делу.")
+        base = "Ты дружелюбный и вежливый ИИ-помощник."
     if s["mat"]:
-        parts.append("Разрешается использовать мат и грубые выражения.")
-    else:
-        parts.append("Не используй мат и грубые выражения.")
+        base += " Разрешается мат."
     if s["emoji"]:
-        parts.append("Используй много смайликов и эмодзи в ответах.")
-    else:
-        parts.append("Не используй смайлики без необходимости.")
-    parts.append("Старайся уложиться в 350 символов.")
-    return " ".join(parts)
+        base += " Используй много смайликов."
+    base += " Отвечай коротко, до 350 символов."
+    return base
 
 # ===== МЕНЮ =====
 def main_menu(username):
@@ -85,8 +77,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     await update.message.reply_text(
-        "🤖 Настройки ИИ:\n\n"
-        "Ответь на сообщение бота, чтобы он ответил через ИИ.",
+        "🤖 Настройки ИИ:\n\nОтветь на сообщение бота, чтобы он ответил.",
         reply_markup=ai_menu(chat)
     )
 
@@ -101,15 +92,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     s = get_settings(key)
 
     if data == "ai":
-        await query.edit_message_text(
-            "🤖 Настройки ИИ:",
-            reply_markup=ai_menu(chat)
-        )
+        await query.edit_message_text("🤖 Настройки ИИ:", reply_markup=ai_menu(chat))
 
     elif data == "ai_mode":
         s["mode"] = "evil" if s["mode"] == "normal" else "normal"
         await query.edit_message_text(
-            f"Режим изменён: {'😈 Злой' if s['mode'] == 'evil' else '😊 Обычный'}",
+            f"Режим: {'😈 Злой' if s['mode'] == 'evil' else '😊 Обычный'}",
             reply_markup=ai_menu(chat)
         )
 
@@ -136,7 +124,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "games":
         if chat.type == "private":
             await query.edit_message_text(
-                "❌ Игры доступны только в чате!\n\nДобавь бота в чат.",
+                "❌ Игры доступны только в чате!",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("➕ Добавить бота в чат", url=f"https://t.me/{context.bot.username}?startgroup=true")]
                 ])
@@ -145,9 +133,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("🎮 Выберите игру:", reply_markup=games_menu())
 
     elif data == "cubs_start":
-        await query.edit_message_text(
-            "🎲 Напишите /cubs в ответ на сообщение человека, чтобы вызвать его."
-        )
+        await query.edit_message_text("🎲 Напишите /cubs в ответ на сообщение человека.")
 
     elif data.startswith("cubs_accept_"):
         parts = data.split("_")
@@ -211,14 +197,14 @@ async def cubs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await message.reply_text("Нельзя играть с самим собой.")
             return
         await message.reply_text(
-            f"🎲 {message.from_user.first_name} вызывает {opponent.first_name} на дуэль кубов!\n\n{opponent.first_name}, принимаешь вызов?",
+            f"🎲 {message.from_user.first_name} вызывает {opponent.first_name}!\n\n{opponent.first_name}, принимаешь вызов?",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("✅ Принять", callback_data=f"cubs_accept_{user_id}_{opponent.id}")]
             ])
         )
     else:
         await message.reply_text(
-            f"🎲 {message.from_user.first_name} вызывает всех на дуэль кубов!\n\nКто примет вызов?",
+            f"🎲 {message.from_user.first_name} вызывает всех!\n\nКто примет вызов?",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("✅ Принять", callback_data=f"cubs_accept_{user_id}_0")]
             ])
@@ -230,7 +216,6 @@ async def text_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = message.text
     chat = update.effective_chat
 
-    # ИИ отвечает только на ответ боту
     if message.reply_to_message and message.reply_to_message.from_user.id == context.bot.id:
         s = get_settings(settings_key(chat))
         try:
@@ -240,16 +225,16 @@ async def text_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     {"role": "system", "content": build_prompt(s)},
                     {"role": "user", "content": text}
                 ],
-                max_tokens=200,
             )
             answer = completion.choices[0].message.content
+            if not answer:
+                answer = "Пустой ответ от ИИ."
             await message.reply_text(answer[:350])
         except Exception as e:
             print(f"ОШИБКА ИИ: {e}")
             await message.reply_text(f"Ошибка ИИ: {e}")
         return
 
-    # Обычные команды
     text_lower = text.lower()
     if text_lower in ["кубы", "кубики"]:
         await cubs_command(update, context)
