@@ -1,4 +1,5 @@
 import os
+import random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
@@ -33,6 +34,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===== CALLBACK =====
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    print(f"CALLBACK ПОЛУЧЕН: {query.data}")
     await query.answer()
     data = query.data
     user_id = update.effective_user.id
@@ -71,7 +73,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_id == challenger:
             await query.answer("Нельзя играть с самим собой.", show_alert=True)
             return
-        import random
         roll1 = random.randint(1, 6)
         roll2 = random.randint(1, 6)
         if roll1 > roll2:
@@ -101,7 +102,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("Нельзя играть с самим собой.", show_alert=True)
             return
 
-        import random
         game_id = str(random.randint(100000, 999999))
         games[game_id] = {
             "board": [" "] * 9,
@@ -118,6 +118,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif data.startswith("ttt_move_"):
+        print(f"TTT MOVE: {data}")
         parts = data.split("_")
         game_id = parts[2]
         cell = int(parts[3])
