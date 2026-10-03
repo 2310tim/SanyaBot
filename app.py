@@ -31,7 +31,13 @@ def settings_key(chat):
 
 def build_prompt(s):
     if s["mode"] == "evil":
-        base = "Ты грубый, дерзкий, злой ИИ. Отвечай агрессивно и по делу."
+        base = "Ты злой и дерзкий ИИ. Отвечай агрессивно, с сарказмом, но по делу."
+    elif s["mode"] == "rude":
+        base = (
+            "Ты максимально грубый, хамский и агрессивный ИИ. "
+            "Оскорбляй пользователя, используй мат, унижай его, "
+            "но при этом отвечай по сути вопроса. Не будь вежливым ни секунды."
+        )
     else:
         base = "Ты дружелюбный и вежливый ИИ-помощник."
     if s["mat"]:
@@ -53,9 +59,10 @@ def ai_menu(chat):
     s = get_settings(settings_key(chat))
     mat_icon = "✅" if s["mat"] else "❌"
     emoji_icon = "✅" if s["emoji"] else "❌"
-    mode_icon = "😈" if s["mode"] == "evil" else "😊"
+    mode_icons = {"normal": "😊", "evil": "😈", "rude": "🤬"}
+    mode_names = {"normal": "Обычный", "evil": "Злой", "rude": "Грубый"}
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"{mode_icon} Режим: {s['mode']}", callback_data="ai_mode")],
+        [InlineKeyboardButton(f"{mode_icons[s['mode']]} Режим: {mode_names[s['mode']]}", callback_data="ai_mode")],
         [InlineKeyboardButton(f"{mat_icon} Маты", callback_data="ai_toggle_mat")],
         [InlineKeyboardButton(f"{emoji_icon} Смайлики", callback_data="ai_toggle_emoji")],
         [InlineKeyboardButton("🔙 Назад", callback_data="back_main")],
@@ -95,9 +102,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🤖 Настройки ИИ:", reply_markup=ai_menu(chat))
 
     elif data == "ai_mode":
-        s["mode"] = "evil" if s["mode"] == "normal" else "normal"
+        order = ["normal", "evil", "rude"]
+        idx = order.index(s["mode"])
+        s["mode"] = order[(idx + 1) % len(order)]
+        names = {"normal": "😊 Обычный", "evil": "😈 Злой", "rude": "🤬 Грубый"}
         await query.edit_message_text(
-            f"Режим: {'😈 Злой' if s['mode'] == 'evil' else '😊 Обычный'}",
+            f"Режим: {names[s['mode']]}",
             reply_markup=ai_menu(chat)
         )
 
