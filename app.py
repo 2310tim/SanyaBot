@@ -40,6 +40,12 @@ def start(message):
 
 @bot.message_handler(commands=['cubs', 'кубики'])
 def cubs_command(message):
+    if message.chat.type == "private":
+        bot.send_message(message.chat.id, "❌ Игры доступны только в чате!\n\nДобавь бота в чат и играй с друзьями.", reply_markup=types.InlineKeyboardMarkup().add(
+            types.InlineKeyboardButton("➕ Добавить бота в чат", url=f"https://t.me/{bot.get_me().username}?startgroup=true")
+        ))
+        return
+
     chat_id = message.chat.id
     user_id = message.from_user.id
     if message.reply_to_message:
@@ -57,6 +63,12 @@ def cubs_command(message):
 
 @bot.message_handler(commands=['tictactoe', 'крестики'])
 def tictactoe_command(message):
+    if message.chat.type == "private":
+        bot.send_message(message.chat.id, "❌ Игры доступны только в чате!\n\nДобавь бота в чат и играй с друзьями.", reply_markup=types.InlineKeyboardMarkup().add(
+            types.InlineKeyboardButton("➕ Добавить бота в чат", url=f"https://t.me/{bot.get_me().username}?startgroup=true")
+        ))
+        return
+
     chat_id = message.chat.id
     user_id = message.from_user.id
     if message.reply_to_message:
@@ -90,7 +102,12 @@ def callback(call):
         bot.send_message(chat_id, "🤖 Режим ИИ. Напишите сообщение, и я отвечу.\n\n(Функция в разработке)")
 
     elif data == "games":
-        bot.send_message(chat_id, "🎮 Режим игр. Доступные игры:\n\n🎲 Кубы — /cubs\n❌⭕ Крестики-нолики — /tictactoe")
+        if call.message.chat.type == "private":
+            bot.send_message(chat_id, "❌ Игры доступны только в чате!\n\nДобавь бота в чат и играй с друзьями.", reply_markup=types.InlineKeyboardMarkup().add(
+                types.InlineKeyboardButton("➕ Добавить бота в чат", url=f"https://t.me/{bot.get_me().username}?startgroup=true")
+            ))
+        else:
+            bot.send_message(chat_id, "🎮 Доступные игры:\n\n🎲 Кубы — /cubs\n❌⭕ Крестики-нолики — /tictactoe")
 
     elif data.startswith("cubs_accept_"):
         parts = data.split("_")
@@ -124,9 +141,24 @@ def callback(call):
         if opponent == challenger:
             bot.answer_callback_query(call.id, "Нельзя играть с самим собой.")
             return
-        game_id = f"{chat_id}_{challenger}_{opponent}"
-        games[game_id] = {"board": [" "] * 9, "turn": challenger, "player1": challenger, "player2": opponent, "chat_id": chat_id}
-        bot.edit_message_text(f"❌⭕ Игра началась!\n\nХод {call.from_user.first_name} (❌)", chat_id, call.message.message_id, reply_markup=ttt_board(game_id))
+
+        # Создаём игру с уникальным ID
+        game_id = str(random.randint(100000, 999999))
+        games[game_id] = {
+            "board": [" "] * 9,
+            "turn": challenger,
+            "player1": challenger,
+            "player2": opponent,
+            "chat_id": chat_id,
+            "message_id": call.message.message_id
+        }
+
+        bot.edit_message_text(
+            f"❌⭕ Игра началась!\n\nХод {call.from_user.first_name} (❌)",
+            chat_id,
+            call.message.message_id,
+            reply_markup=ttt_board(game_id)
+        )
 
 def ttt_board(game_id):
     game = games.get(game_id)
@@ -146,30 +178,50 @@ def ttt_move(call):
     bot.answer_callback_query(call.id)
     data = call.data
     parts = data.split("_")
-    game_id = parts[2] + "_" + parts[3] + "_" + parts[4]
-    cell = int(parts[5])
+    game_id = parts[2]
+    cell = int(parts[3])
+
     game = games.get(game_id)
     if not game:
         bot.answer_callback_query(call.id, "Игра не найдена.")
         return
+
     if call.from_user.id != game["turn"]:
         bot.answer_callback_query(call.id, "Сейчас не твой ход.")
         return
+
     if game["board"][cell] != " ":
         bot.answer_callback_query(call.id, "Клетка занята.")
         return
+
     symbol = "❌" if call.from_user.id == game["player1"] else "⭕"
     game["board"][cell] = symbol
+
     if check_winner(game["board"]):
-        bot.edit_message_text(f"❌⭕ Игра окончена!\n\nПобедил {call.from_user.first_name}!", game["chat_id"], call.message.message_id)
+        bot.edit_message_text(
+            f"❌⭕ Игра окончена!\n\nПобедил {call.from_user.first_name}!",
+            game["chat_id"],
+            game["message_id"]
+        )
         del games[game_id]
         return
+
     if " " not in game["board"]:
-        bot.edit_message_text("❌⭕ Игра окончена!\n\nНичья!", game["chat_id"], call.message.message_id)
+        bot.edit_message_text(
+            "❌⭕ Игра окончена!\n\nНичья!",
+            game["chat_id"],
+            game["message_id"]
+        )
         del games[game_id]
         return
+
     game["turn"] = game["player2"] if game["turn"] == game["player1"] else game["player1"]
-    bot.edit_message_reply_markup(game["chat_id"], call.message.message_id, reply_markup=ttt_board(game_id))
+
+    bot.edit_message_reply_markup(
+        game["chat_id"],
+        game["message_id"],
+        reply_markup=ttt_board(game_id)
+    )
 
 def check_winner(board):
     wins = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]]
@@ -184,4 +236,4 @@ if __name__ == "__main__":
         daemon=True
     ).start()
     print("Бот запущен...")
-    bot.polling(none_stop=True)
+    bot.polling(non_stop=True)
