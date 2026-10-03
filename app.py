@@ -128,11 +128,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             if user_id != game["turn"]:
-                await query.answer("Сейчас не твой ход.", show_alert=True)
+                await query.answer("Сейчас не твой ход!", show_alert=True)
                 return
 
             if game["board"][cell] != " ":
-                await query.answer("Клетка занята.", show_alert=True)
+                await query.answer("Клетка занята!", show_alert=True)
                 return
 
             symbol = "❌" if user_id == game["player1"] else "⭕"
@@ -154,6 +154,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         except Exception as e:
             print(f"ОШИБКА TTT_MOVE: {e}")
+            await query.answer(f"Ошибка: {e}", show_alert=True)
 
 def ttt_board(game_id):
     game = games.get(game_id)
