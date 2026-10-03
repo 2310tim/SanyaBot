@@ -4,3 +4,4 @@ Werkzeug==2.3.6
 urllib3
 requests
 pyTelegramBotAPI
+Pillow
