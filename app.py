@@ -62,61 +62,53 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("cubs_accept_"):
         parts = data.split("_")
-        challenger = int(parts[2])
-        target = int(parts[3])
-        if target != 0 and user_id != target:
+        challenger_id = int(parts[2])
+        target_id = int(parts[3])
+        if target_id != 0 and user_id != target_id:
             await query.answer("Этот вызов не для тебя.", show_alert=True)
             return
-        if user_id == challenger:
+        if user_id == challenger_id:
             await query.answer("Нельзя играть с самим собой.", show_alert=True)
             return
 
-        await query.edit_message_text(
-            f"🎲 Дуэль кубов!\n\n{query.from_user.first_name}, кидай кубик!",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🎲 Кинуть кубик", callback_data=f"cubs_roll_{challenger}_{user_id}")]
-            ])
-        )
+        # Получаем имена обоих игроков
+        try:
+            challenger_chat = await context.bot.get_chat(challenger_id)
+            opponent_chat = await context.bot.get_chat(user_id)
+            name1 = challenger_chat.first_name or "Игрок 1"
+            name2 = opponent_chat.first_name or "Игрок 2"
+        except Exception:
+            name1 = "Игрок 1"
+            name2 = "Игрок 2"
 
-    elif data.startswith("cubs_roll_"):
-        parts = data.split("_")
-        challenger = int(parts[2])
-        opponent = int(parts[3])
+        await query.edit_message_text("🎲 Кидаем кубики...")
 
-        if user_id not in [challenger, opponent]:
-            await query.answer("Ты не участник этой игры.", show_alert=True)
-            return
+        # Кидаем кубик за первого игрока
+        dice1 = await context.bot.send_dice(chat_id=chat_id, emoji="🎲")
+        v1 = dice1.dice.value
+        await context.bot.send_message(chat_id, f"🎲 {name1} выпало: {v1}")
 
-        # Отправляем кубик от имени бота
-        dice_msg = await context.bot.send_dice(chat_id=chat_id, emoji="🎲")
-        value = dice_msg.dice.value
+        # Кидаем кубик за второго игрока
+        dice2 = await context.bot.send_dice(chat_id=chat_id, emoji="🎲")
+        v2 = dice2.dice.value
+        await context.bot.send_message(chat_id, f"🎲 {name2} выпало: {v2}")
 
-        # Сохраняем результат
-        if "cubs_results" not in games:
-            games["cubs_results"] = {}
-
-        games["cubs_results"][user_id] = value
-
-        # Проверяем, оба ли кинули
-        if challenger in games["cubs_results"] and opponent in games["cubs_results"]:
-            v1 = games["cubs_results"][challenger]
-            v2 = games["cubs_results"][opponent]
-            if v1 > v2:
-                result = "🏆 Победил первый игрок!"
-            elif v2 > v1:
-                result = "🏆 Победил второй игрок!"
-            else:
-                result = "🤝 Ничья!"
-            await context.bot.send_message(
-                chat_id,
-                f"🎲 Результаты:\nИгрок 1: {v1}\nИгрок 2: {v2}\n\n{result}"
-            )
-            del games["cubs_results"]
+        # Определяем победителя
+        if v1 > v2:
+            result = f"🏆 Победил {name1}!"
+        elif v2 > v1:
+            result = f"🏆 Победил {name2}!"
         else:
-            await context.bot.send_message(
-                chat_id,
-                f"🎲 Выпало: {value}\n\nЖдём второго игрока..."
-            )
+            result = "🤝 Ничья!"
+
+        await context.bot.send_message(
+            chat_id,
+            f"🎲 **Результаты дуэли:**\n"
+            f"• {name1}: {v1}\n"
+            f"• {name2}: {v2}\n\n"
+            f"{result}",
+            parse_mode="Markdown"
+        )
 
 # ===== КОМАНДЫ =====
 async def cubs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
