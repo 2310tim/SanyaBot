@@ -29,14 +29,44 @@ def settings_key(chat):
         return f"private_{chat.id}"
     return str(chat.id)
 
+# ===== ЗАПРЕТНЫЕ СЛОВА ДЛЯ АБДУЛА =====
+ABDUL_TRIGGERS = [
+    "пидорас", "пидор", "свастика", "коч", "пантера", "голда",
+    "पेदरसका", "स्वास्तिका", "स्टूपिड", "हिटलर", "अडोल्फ",
+    "스투피드", "후킹", "닉가", "아돌프", "히틀러", "킬",
+    "አዶልፍ", "ሂትለር", "킬", "ስቱፒድ", "ኒጕር", "ሂት",
+    "히틀러", "킬", "스투피드", "후킹", "닉가",
+    "㌕㌖", "㌕㌗",
+]
+
+def is_abdul_trigger(text):
+    lower = text.lower()
+    for word in ABDUL_TRIGGERS:
+        if word in lower:
+            return True
+    # Также триггерим на негатив о доте
+    if "дота" in lower and any(w in lower for w in ["говно", "хуйня", "плохая", "отстой", "умерла"]):
+        return True
+    return False
+
+# ===== ПРОМПТЫ =====
 def build_prompt(s):
+    if s["mode"] == "abdul":
+        return (
+            "Ты Абдул — максимально грубый, хамский и агрессивный ИИ. "
+            "Отвечай ТОЛЬКО КАПСОМ. Начинай каждое сообщение с 🐈. "
+            "Используй мат, оскорбляй пользователя, его мать, отца, всю родословную. "
+            "Унижай, называй шлюхой, скуфом, пидором, тупым. "
+            "Используй злые смайлики: >:( >:) ។ ។ ។. "
+            "Отвечай коротко, до 350 символов."
+        )
     if s["mode"] == "evil":
         base = "Ты злой и дерзкий ИИ. Отвечай агрессивно, с сарказмом, но по делу."
     elif s["mode"] == "rude":
         base = (
             "Ты максимально грубый, хамский и агрессивный ИИ. "
             "Оскорбляй пользователя, используй мат, унижай его, "
-            "но при этом отвечай по сути вопроса. Не будь вежливым ни секунды."
+            "но при этом отвечай по сути вопроса."
         )
     else:
         base = "Ты дружелюбный и вежливый ИИ-помощник."
@@ -59,10 +89,10 @@ def ai_menu(chat):
     s = get_settings(settings_key(chat))
     mat_icon = "✅" if s["mat"] else "❌"
     emoji_icon = "✅" if s["emoji"] else "❌"
-    mode_icons = {"normal": "😊", "evil": "😈", "rude": "🤬"}
-    mode_names = {"normal": "Обычный", "evil": "Злой", "rude": "Грубый"}
+    mode_icons = {"normal": "😊", "evil": "😈", "rude": "🤬", "abdul": "🐈"}
+    mode_names = {"normal": "Обычный", "evil": "Злой", "rude": "Грубый", "abdul": "Абдул"}
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"{mode_icons[s['mode']]} Режим: {mode_names[s['mode']]}", callback_data="ai_mode")],
+        [InlineKeyboardButton(f"{mode_icons[s['mode']]} Режим: {mode_names[s['mode']}", callback_data="ai_mode")],
         [InlineKeyboardButton(f"{mat_icon} Маты", callback_data="ai_toggle_mat")],
         [InlineKeyboardButton(f"{emoji_icon} Смайлики", callback_data="ai_toggle_emoji")],
         [InlineKeyboardButton("🔙 Назад", callback_data="back_main")],
@@ -102,10 +132,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🤖 Настройки ИИ:", reply_markup=ai_menu(chat))
 
     elif data == "ai_mode":
-        order = ["normal", "evil", "rude"]
+        order = ["normal", "evil", "rude", "abdul"]
         idx = order.index(s["mode"])
         s["mode"] = order[(idx + 1) % len(order)]
-        names = {"normal": "😊 Обычный", "evil": "😈 Злой", "rude": "🤬 Грубый"}
+        names = {"normal": "😊 Обычный", "evil": "😈 Злой", "rude": "🤬 Грубый", "abdul": "🐈 Абдул"}
         await query.edit_message_text(
             f"Режим: {names[s['mode']]}",
             reply_markup=ai_menu(chat)
@@ -228,11 +258,19 @@ async def text_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if message.reply_to_message and message.reply_to_message.from_user.id == context.bot.id:
         s = get_settings(settings_key(chat))
+
+        # Режим Абдул триггерится на запретные слова
+        if s["mode"] == "abdul" and is_abdul_trigger(text):
+            s_copy = {"mode": "abdul", "mat": True, "emoji": True}
+            prompt = build_prompt(s_copy)
+        else:
+            prompt = build_prompt(s)
+
         try:
             completion = client.chat.completions.create(
                 model="deepseek/deepseek-v4-flash",
                 messages=[
-                    {"role": "system", "content": build_prompt(s)},
+                    {"role": "system", "content": prompt},
                     {"role": "user", "content": text}
                 ],
             )
