@@ -1,5 +1,6 @@
 import os
 import random
+from openai import OpenAI
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
@@ -7,7 +8,18 @@ TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TOKEN:
     raise ValueError("Токен не найден")
 
-games = {}
+DEEPSEEK_KEY = os.getenv("DEEPSEEK_API_KEY")
+if not DEEPSEEK_KEY:
+    raise ValueError("DEEPSEEK_API_KEY не найден")
+
+# ===== КЛИЕНТ APIMIRA =====
+client = OpenAI(
+    base_url="https://apimira.com/v1",
+    api_key=DEEPSEEK_KEY,
+)
+
+# Режимы пользователей: {user_id: "ai"} или {user_id: None}
+user_modes = {}
 
 # ===== МЕНЮ =====
 def main_menu(username):
@@ -24,8 +36,15 @@ def games_menu():
     ]
     return InlineKeyboardMarkup(keyboard)
 
+def ai_menu():
+    keyboard = [
+        [InlineKeyboardButton("❌ Выйти из режима ИИ", callback_data="ai_exit")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
 # ===== START =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_modes.pop(update.effective_user.id, None)
     await update.message.reply_text(
         "👋 Здравствуйте!\n\nВыберите действие:",
         reply_markup=main_menu(context.bot.username)
@@ -41,7 +60,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
 
     if data == "ai":
-        await query.edit_message_text("🤖 Режим ИИ.\n\n(Функция в разработке)")
+        user_modes[user_id] = "ai"
+        await query.edit_message_text(
+            "🤖 Режим ИИ включён.\n\nНапиши любое сообщение — я отвечу.\n\n"
+            "Чтобы выйти — нажми кнопку ниже.",
+            reply_markup=ai_menu()
+        )
+
+    elif data == "ai_exit":
+        user_modes.pop(user_id, None)
+        await query.edit_message_text(
+            "👋 Вы вышли из режима ИИ.\n\nВыберите действие:",
+            reply_markup=main_menu(context.bot.username)
+        )
 
     elif data == "games":
         if update.effective_chat.type == "private":
@@ -71,7 +102,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("Нельзя играть с самим собой.", show_alert=True)
             return
 
-        # Получаем имена обоих игроков
         try:
             challenger_chat = await context.bot.get_chat(challenger_id)
             opponent_chat = await context.bot.get_chat(user_id)
@@ -83,17 +113,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.edit_message_text("🎲 Кидаем кубики...")
 
-        # Кидаем кубик за первого игрока
         dice1 = await context.bot.send_dice(chat_id=chat_id, emoji="🎲")
         v1 = dice1.dice.value
         await context.bot.send_message(chat_id, f"🎲 {name1} выпало: {v1}")
 
-        # Кидаем кубик за второго игрока
         dice2 = await context.bot.send_dice(chat_id=chat_id, emoji="🎲")
         v2 = dice2.dice.value
         await context.bot.send_message(chat_id, f"🎲 {name2} выпало: {v2}")
 
-        # Определяем победителя
         if v1 > v2:
             result = f"🏆 Победил {name1}!"
         elif v2 > v1:
@@ -141,9 +168,31 @@ async def cubs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ])
         )
 
+# ===== ТЕКСТ =====
 async def text_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.lower()
-    if text in ["кубы", "кубики"]:
+    user_id = update.effective_user.id
+    text = update.message.text
+
+    # Если пользователь в режиме ИИ
+    if user_modes.get(user_id) == "ai":
+        try:
+            completion = client.chat.completions.create(
+                model="deepseek/deepseek-v4-flash",
+                messages=[
+                    {"role": "system", "content": "Ты грубый, дерзкий, злой ИИ. Матерись, отвечай без цензуры, но по делу."},
+                    {"role": "user", "content": text}
+                ],
+            )
+            answer = completion.choices[0].message.content
+            await update.message.reply_text(answer[:4096])
+        except Exception as e:
+            print(f"ОШИБКА ИИ: {e}")
+            await update.message.reply_text(f"Ошибка ИИ: {e}")
+        return
+
+    # Обычные команды
+    text_lower = text.lower()
+    if text_lower in ["кубы", "кубики"]:
         await cubs_command(update, context)
 
 # ===== ЗАПУСК (WEBHOOK) =====
