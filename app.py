@@ -100,7 +100,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("Нельзя играть с самим собой.", show_alert=True)
             return
 
-        game_id = str(random.randint(10, 99))  # КОРОТКИЙ ID
+        game_id = str(random.randint(10, 99))
         games[game_id] = {
             "board": [" "] * 9,
             "turn": challenger,
@@ -116,39 +116,44 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif data.startswith("ttt_move_"):
-        print(f"TTT MOVE: {data}")
-        parts = data.split("_")
-        game_id = parts[2]
-        cell = int(parts[3])
+        try:
+            parts = data.split("_")
+            game_id = parts[2]
+            cell = int(parts[3])
+            print(f"TTT MOVE: game_id={game_id}, cell={cell}")
 
-        game = games.get(game_id)
-        if not game:
-            await query.answer("Игра не найдена.", show_alert=True)
-            return
+            game = games.get(game_id)
+            if not game:
+                await query.answer("Игра не найдена.", show_alert=True)
+                return
 
-        if user_id != game["turn"]:
-            await query.answer("Сейчас не твой ход.", show_alert=True)
-            return
+            if user_id != game["turn"]:
+                await query.answer("Сейчас не твой ход.", show_alert=True)
+                return
 
-        if game["board"][cell] != " ":
-            await query.answer("Клетка занята.", show_alert=True)
-            return
+            if game["board"][cell] != " ":
+                await query.answer("Клетка занята.", show_alert=True)
+                return
 
-        symbol = "❌" if user_id == game["player1"] else "⭕"
-        game["board"][cell] = symbol
+            symbol = "❌" if user_id == game["player1"] else "⭕"
+            game["board"][cell] = symbol
 
-        if check_winner(game["board"]):
-            await query.edit_message_text(f"❌⭕ Игра окончена!\n\nПобедил {query.from_user.first_name}!")
-            del games[game_id]
-            return
+            if check_winner(game["board"]):
+                await query.edit_message_text(f"❌⭕ Игра окончена!\n\nПобедил {query.from_user.first_name}!")
+                del games[game_id]
+                return
 
-        if " " not in game["board"]:
-            await query.edit_message_text("❌⭕ Игра окончена!\n\nНичья!")
-            del games[game_id]
-            return
+            if " " not in game["board"]:
+                await query.edit_message_text("❌⭕ Игра окончена!\n\nНичья!")
+                del games[game_id]
+                return
 
-        game["turn"] = game["player2"] if game["turn"] == game["player1"] else game["player1"]
-        await query.edit_message_reply_markup(reply_markup=ttt_board(game_id))
+            game["turn"] = game["player2"] if game["turn"] == game["player1"] else game["player1"]
+            await query.edit_message_reply_markup(reply_markup=ttt_board(game_id))
+            print(f"СООБЩЕНИЕ ОБНОВЛЕНО для игры {game_id}")
+
+        except Exception as e:
+            print(f"ОШИБКА TTT_MOVE: {e}")
 
 def ttt_board(game_id):
     game = games.get(game_id)
