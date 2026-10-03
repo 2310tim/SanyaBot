@@ -1,4 +1,5 @@
 import os
+import asyncio
 from openai import OpenAI
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
@@ -29,14 +30,32 @@ def settings_key(chat):
         return f"private_{chat.id}"
     return str(chat.id)
 
+# ===== АНИМАЦИИ =====
+ANIMATIONS = {
+    "normal": ["😁", "😃", "😆", "😅"],
+    "evil": ["🤬", "👿", "😡", "😤", "😠"],
+    "rude": ["🤬", "👿", "😡", "😤", "😠"],
+    "abdul": ["🐈", "😈", "🤬", "😡"],
+}
+
+async def animate_thinking(message, mode):
+    """Анимация смайликов, пока ИИ думает. Возвращает объект сообщения."""
+    frames = ANIMATIONS.get(mode, ANIMATIONS["normal"])
+    sent = await message.reply_text(frames[0])
+    try:
+        i = 1
+        while True:
+            await asyncio.sleep(0.5)
+            await sent.edit_text(frames[i % len(frames)])
+            i += 1
+    except asyncio.CancelledError:
+        return sent
+    except Exception:
+        return sent
+
 # ===== ЗАПРЕТНЫЕ СЛОВА ДЛЯ АБДУЛА =====
 ABDUL_TRIGGERS = [
     "пидорас", "пидор", "свастика", "коч", "пантера", "голда",
-    "पेदरसका", "स्वास्तिका", "स्टूपिड", "हिटलर", "अडोल्फ",
-    "스투피드", "후킹", "닉가", "아돌프", "히틀러", "킬",
-    "አዶልፍ", "ሂትለር", "킬", "ስቱፒድ", "ኒጕር", "ሂት",
-    "히틀러", "킬", "스투피드", "후킹", "닉가",
-    "㌕㌖", "㌕㌗",
 ]
 
 def is_abdul_trigger(text):
@@ -54,8 +73,7 @@ def build_prompt(s):
         return (
             "Ты Абдул — максимально грубый, хамский и агрессивный ИИ. "
             "Отвечай ТОЛЬКО КАПСОМ. "
-            "Используй мат, оскорбляй пользователя, его мать, отца, всю родословную. "
-            "Унижай, называй шлюхой, скуфом, пидором, тупым. "
+            "Используй мат, оскорбляй пользователя. "
             "Используй только такие смайлики: 😡 👎 🖕 💀 🤬. "
             "НЕ используй странные символы, иероглифы и кастомные эмодзи. "
             "Отвечай коротко, до 350 символов."
@@ -265,6 +283,9 @@ async def text_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             prompt = build_prompt(s)
 
+        # Запускаем анимацию
+        anim_task = asyncio.create_task(animate_thinking(message, s["mode"]))
+
         try:
             completion = client.chat.completions.create(
                 model="deepseek/deepseek-v4-flash",
@@ -276,10 +297,20 @@ async def text_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
             answer = completion.choices[0].message.content
             if not answer:
                 answer = "Пустой ответ от ИИ."
-            await message.reply_text(answer[:350])
         except Exception as e:
             print(f"ОШИБКА ИИ: {e}")
-            await message.reply_text(f"Ошибка ИИ: {e}")
+            answer = f"Ошибка ИИ: {e}"
+
+        # Останавливаем анимацию и удаляем сообщение
+        anim_task.cancel()
+        try:
+            anim_msg = await anim_task
+            if anim_msg:
+                await anim_msg.delete()
+        except Exception:
+            pass
+
+        await message.reply_text(answer[:350])
         return
 
     text_lower = text.lower()
