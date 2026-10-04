@@ -1,7 +1,7 @@
 import os
 import random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TOKEN:
@@ -270,10 +270,57 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "noop":
         await query.answer()
 
+# ===== ОБРАБОТКА ТЕКСТА =====
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.lower().strip()
+
+    if text in ["пицца", "пиццерия"]:
+        user_id = update.effective_user.id
+        await update.message.reply_text(
+            pizza_text(user_id),
+            parse_mode="Markdown",
+            reply_markup=pizza_menu(user_id)
+        )
+
+    elif text in ["кубы", "кубики"]:
+        # Логика кубов
+        if update.effective_chat.type == "private":
+            await update.message.reply_text("❌ Игры доступны только в чате!")
+            return
+        user_id = update.effective_user.id
+        message = update.message
+        if message.reply_to_message:
+            opponent = message.reply_to_message.from_user
+            if opponent.id == user_id:
+                await message.reply_text("Нельзя играть с самим собой.")
+                return
+            await message.reply_text(
+                f"🎲 {message.from_user.first_name} вызывает {opponent.first_name}!\n\n{opponent.first_name}, принимаешь вызов?",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✅ Принять", callback_data=f"cubs_accept_{user_id}_{opponent.id}")]
+                ])
+            )
+        else:
+            await message.reply_text(
+                f"🎲 {message.from_user.first_name} вызывает всех!\n\nКто примет вызов?",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✅ Принять", callback_data=f"cubs_accept_{user_id}_0")]
+                ])
+            )
+
+    elif text in ["ии", "нейросеть"]:
+        await update.message.reply_text(
+            "🤖 Настройки ИИ:",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Назад", callback_data="back_main")]
+            ])
+        )
+
 def main():
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
     PORT = int(os.environ.get("PORT", 8443))
     WEBHOOK_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://sanyabot-gdx4.onrender.com")
