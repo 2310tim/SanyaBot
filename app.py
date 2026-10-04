@@ -1,6 +1,5 @@
 import os
-import asyncio
-from openai import OpenAI
+import random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
@@ -8,285 +7,295 @@ TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TOKEN:
     raise ValueError("Токен не найден")
 
-DEEPSEEK_KEY = os.getenv("DEEPSEEK_API_KEY")
-if not DEEPSEEK_KEY:
-    raise ValueError("DEEPSEEK_API_KEY не найден")
+# ===== ХРАНИЛИЩЕ =====
+users = {}  # {user_id: {"balance": 0, "level": 1, "orders": 0, "success": 0, "fail": 0, "last_order": None}}
 
-client = OpenAI(
-    base_url="https://apimira.com/v1",
-    api_key=DEEPSEEK_KEY,
-)
+def get_user(user_id):
+    if user_id not in users:
+        users[user_id] = {
+            "balance": 0,
+            "level": 1,
+            "orders": 0,
+            "success": 0,
+            "fail": 0,
+            "last_order": None,
+        }
+    return users[user_id]
 
-# ===== НАСТРОЙКИ =====
-settings = {}
+# ===== УРОВНИ =====
+LEVELS = {
+    1: {"name": "Гараж", "min_ingredients": 2},
+    2: {"name": "Ларёк", "min_ingredients": 3},
+    3: {"name": "Кафе", "min_ingredients": 4},
+    4: {"name": "Ресторан", "min_ingredients": 5},
+    5: {"name": "Сеть", "min_ingredients": 6},
+}
 
-def get_settings(key):
-    if key not in settings:
-        settings[key] = {"mode": "normal", "mat": False, "emoji": False}
-    return settings[key]
+# ===== ИНГРЕДИЕНТЫ =====
+DOUGH = ["Обычное", "Сырное", "Тонкое", "Пышное"]
+SAUCE = ["Кетчуп", "Сырный", "Чесночный", "Барбекю"]
+FILLING = ["Колбаса", "Пепперони", "Грибы", "Помидоры", "Оливки", "Курица"]
+CHEESE = ["Моцарелла", "Чеддер", "Пармезан"]
 
-def settings_key(chat):
-    if chat.type == "private":
-        return f"private_{chat.id}"
-    return str(chat.id)
-
-# ===== ЗАГЛУШКА "ИИ ДУМАЕТ" =====
-async def animate_thinking(message, mode):
-    sent = await message.reply_text("⏳ ИИ думает...")
-    return sent
-
-# ===== ЗАПРЕТНЫЕ СЛОВА =====
-ABDUL_TRIGGERS = ["пидорас", "пидор", "свастика", "коч", "пантера", "голда"]
-
-def is_abdul_trigger(text):
-    lower = text.lower()
-    for word in ABDUL_TRIGGERS:
-        if word in lower:
-            return True
-    if "дота" in lower and any(w in lower for w in ["говно", "хуйня", "плохая", "отстой", "умерла"]):
-        return True
-    return False
-
-# ===== ПРОМПТЫ =====
-def build_prompt(s):
-    if s["mode"] == "abdul":
-        return (
-            "Ты Абдул — максимально грубый, хамский и агрессивный ИИ. "
-            "Отвечай ТОЛЬКО КАПСОМ. Используй мат, оскорбляй пользователя. "
-            "Используй только такие смайлики: 😡 👎 🖕 💀 🤬. "
-            "Отвечай коротко, до 350 символов."
-        )
-    if s["mode"] == "evil":
-        base = "Ты злой и дерзкий ИИ. Отвечай агрессивно, с сарказмом, но по делу."
-    elif s["mode"] == "rude":
-        base = "Ты максимально грубый, хамский и агрессивный ИИ. Оскорбляй пользователя, используй мат."
-    else:
-        base = "Ты дружелюбный и вежливый ИИ-помощник."
-    if s["mat"]:
-        base += " Разрешается мат."
-    if s["emoji"]:
-        base += " Используй много смайликов."
-    base += " Отвечай коротко, до 350 символов."
-    return base
-
-# ===== МЕНЮ =====
-def main_menu(username):
+# ===== МЕНЮ ПИЦЦЕРИИ =====
+def pizza_menu(user_id):
+    u = get_user(user_id)
+    level_name = LEVELS[u["level"]]["name"]
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🤖 Чат с ИИ", callback_data="ai")],
-        [InlineKeyboardButton("🎮 Игры", callback_data="games")],
-        [InlineKeyboardButton("➕ Добавить бота в чат", url=f"https://t.me/{username}?startgroup=true")],
-    ])
-
-def ai_menu(chat):
-    s = get_settings(settings_key(chat))
-    mat_icon = "✅" if s["mat"] else "❌"
-    emoji_icon = "✅" if s["emoji"] else "❌"
-    mode_icons = {"normal": "😊", "evil": "😈", "rude": "🤬", "abdul": "🐈"}
-    mode_names = {"normal": "Обычный", "evil": "Злой", "rude": "Грубый", "abdul": "Абдул"}
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"{mode_icons[s['mode']]} Режим: {mode_names[s['mode']]}", callback_data="ai_mode")],
-        [InlineKeyboardButton(f"{mat_icon} Маты", callback_data="ai_toggle_mat")],
-        [InlineKeyboardButton(f"{emoji_icon} Смайлики", callback_data="ai_toggle_emoji")],
+        [InlineKeyboardButton("🍳 Обслужить клиента", callback_data="pizza_order")],
+        [InlineKeyboardButton("🏭 Улучшения", callback_data="pizza_upgrades")],
+        [InlineKeyboardButton("📊 Статистика", callback_data="pizza_stats")],
         [InlineKeyboardButton("🔙 Назад", callback_data="back_main")],
     ])
 
-def games_menu():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎲 Кубы", callback_data="cubs_start")],
+def pizza_text(user_id):
+    u = get_user(user_id)
+    level_name = LEVELS[u["level"]]["name"]
+    return (
+        f"🍕 **ПИЦЦЕРИЯ**\n\n"
+        f"💰 Баланс: {u['balance']} монет\n"
+        f"⭐ Уровень: {u['level']} ({level_name})\n"
+        f"👥 Заказов: {u['orders']}\n"
+    )
+
+# ===== ГЕНЕРАЦИЯ ЗАКАЗА =====
+def generate_order(user_id):
+    u = get_user(user_id)
+    lvl = u["level"]
+    min_ing = LEVELS[lvl]["min_ingredients"]
+    max_ing = min_ing + 2
+
+    ingredients = {
+        "dough": random.choice(DOUGH),
+        "sauce": random.choice(SAUCE),
+        "filling": random.sample(FILLING, random.randint(1, 2)),
+        "cheese": random.choice(CHEESE),
+    }
+
+    order_text = (
+        f"🍕 **КЛИЕНТ ГОВОРИТ:**\n\n"
+        f"«Хочу пиццу на {ingredients['dough'].lower()} тесте, "
+        f"с {ingredients['sauce'].lower()}, "
+        f"{', '.join(ingredients['filling']).lower()} "
+        f"и {ingredients['cheese'].lower()}»"
+    )
+
+    return ingredients, order_text
+
+# ===== МЕНЮ ИНГРЕДИЕНТОВ =====
+def ingredients_menu(user_id, selected):
+    u = get_user(user_id)
+
+    def mark(item, category):
+        if item in selected.get(category, []):
+            return f"✅ {item}"
+        return item
+
+    rows = []
+
+    # Тесто
+    rows.append([InlineKeyboardButton("ТЕСТО:", callback_data="noop")])
+    row = []
+    for d in DOUGH:
+        row.append(InlineKeyboardButton(mark(d, "dough"), callback_data=f"pick_dough_{d}"))
+    rows.append(row)
+
+    # Соус
+    rows.append([InlineKeyboardButton("СОУС:", callback_data="noop")])
+    row = []
+    for s in SAUCE:
+        row.append(InlineKeyboardButton(mark(s, "sauce"), callback_data=f"pick_sauce_{s}"))
+    rows.append(row)
+
+    # Начинка
+    rows.append([InlineKeyboardButton("НАЧИНКА:", callback_data="noop")])
+    row = []
+    for f in FILLING:
+        row.append(InlineKeyboardButton(mark(f, "filling"), callback_data=f"pick_filling_{f}"))
+        if len(row) == 3:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+
+    # Сыр
+    rows.append([InlineKeyboardButton("СЫР:", callback_data="noop")])
+    row = []
+    for c in CHEESE:
+        row.append(InlineKeyboardButton(mark(c, "cheese"), callback_data=f"pick_cheese_{c}"))
+    rows.append(row)
+
+    # Кнопки управления
+    rows.append([
+        InlineKeyboardButton("✅ Готово", callback_data="pizza_cook"),
+        InlineKeyboardButton("❌ Отмена", callback_data="pizza_cancel"),
     ])
+
+    return InlineKeyboardMarkup(rows)
 
 # ===== START =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Здравствуйте!\n\nВыберите действие:",
-        reply_markup=main_menu(context.bot.username)
-    )
-
-async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat = update.effective_chat
-    await update.message.reply_text(
-        "🤖 Настройки ИИ:\n\nОтветь на сообщение бота, чтобы он ответил.",
-        reply_markup=ai_menu(chat)
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🍕 Пиццерия", callback_data="pizza_menu")],
+        ])
     )
 
 # ===== CALLBACK =====
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    print(f"CALLBACK: {query.data}")
     await query.answer()
     data = query.data
-    chat = update.effective_chat
-    key = settings_key(chat)
-    s = get_settings(key)
+    user_id = update.effective_user.id
+    u = get_user(user_id)
 
-    if data == "ai":
-        await query.edit_message_text("🤖 Настройки ИИ:", reply_markup=ai_menu(chat))
-
-    elif data == "ai_mode":
-        order = ["normal", "evil", "rude", "abdul"]
-        idx = order.index(s["mode"])
-        s["mode"] = order[(idx + 1) % len(order)]
-        names = {"normal": "😊 Обычный", "evil": "😈 Злой", "rude": "🤬 Грубый", "abdul": "🐈 Абдул"}
-        await query.edit_message_text(f"Режим: {names[s['mode']]}", reply_markup=ai_menu(chat))
-
-    elif data == "ai_toggle_mat":
-        s["mat"] = not s["mat"]
+    # ---- ПИЦЦЕРИЯ ----
+    if data == "pizza_menu":
         await query.edit_message_text(
-            f"Маты: {'включены ✅' if s['mat'] else 'выключены ❌'}",
-            reply_markup=ai_menu(chat)
+            pizza_text(user_id),
+            parse_mode="Markdown",
+            reply_markup=pizza_menu(user_id)
         )
 
-    elif data == "ai_toggle_emoji":
-        s["emoji"] = not s["emoji"]
+    elif data == "pizza_order":
+        if "current_order" not in context.user_data:
+            context.user_data["current_order"] = generate_order(user_id)
+            context.user_data["selected"] = {"dough": [], "sauce": [], "filling": [], "cheese": []}
+
+        ingredients, order_text = context.user_data["current_order"]
         await query.edit_message_text(
-            f"Смайлики: {'включены ✅' if s['emoji'] else 'выключены ❌'}",
-            reply_markup=ai_menu(chat)
+            order_text,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🍳 Готовить", callback_data="pizza_pick")],
+                [InlineKeyboardButton("🔙 Назад", callback_data="pizza_menu")],
+            ])
+        )
+
+    elif data == "pizza_pick":
+        selected = context.user_data.get("selected", {"dough": [], "sauce": [], "filling": [], "cheese": []})
+        await query.edit_message_text(
+            "🍕 **Выбери ингредиенты:**",
+            parse_mode="Markdown",
+            reply_markup=ingredients_menu(user_id, selected)
+        )
+
+    elif data.startswith("pick_"):
+        parts = data.split("_", 2)
+        category = parts[1]
+        item = parts[2]
+
+        selected = context.user_data.get("selected", {"dough": [], "sauce": [], "filling": [], "cheese": []})
+
+        if item in selected[category]:
+            selected[category].remove(item)
+        else:
+            if category == "dough" or category == "sauce" or category == "cheese":
+                selected[category] = [item]
+            else:
+                selected[category].append(item)
+
+        context.user_data["selected"] = selected
+        await query.edit_message_reply_markup(reply_markup=ingredients_menu(user_id, selected))
+
+    elif data == "pizza_cook":
+        selected = context.user_data.get("selected", {})
+        ingredients, order_text = context.user_data.get("current_order", (None, None))
+
+        if not ingredients:
+            await query.edit_message_text("Ошибка: заказ потерян.")
+            return
+
+        # Проверка
+        correct = True
+        if selected.get("dough", []) != [ingredients["dough"]]:
+            correct = False
+        if selected.get("sauce", []) != [ingredients["sauce"]]:
+            correct = False
+        if sorted(selected.get("filling", [])) != sorted(ingredients["filling"]):
+            correct = False
+        if selected.get("cheese", []) != [ingredients["cheese"]]:
+            correct = False
+
+        u["orders"] += 1
+
+        if correct:
+            reward = 20 * u["level"]
+            u["balance"] += reward
+            u["success"] += 1
+            result_text = (
+                f"✅ **Заказ выполнен!**\n\n"
+                f"Клиент доволен 😊\n"
+                f"Ты заработал: {reward} монет"
+            )
+        else:
+            u["fail"] += 1
+            result_text = (
+                f"❌ **Клиент ушёл!**\n\n"
+                f"Ты перепутал ингредиенты."
+            )
+
+        context.user_data.pop("current_order", None)
+        context.user_data.pop("selected", None)
+
+        await query.edit_message_text(
+            result_text,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🍳 Следующий клиент", callback_data="pizza_order")],
+                [InlineKeyboardButton("🏠 В меню пиццерии", callback_data="pizza_menu")],
+            ])
+        )
+
+    elif data == "pizza_cancel":
+        context.user_data.pop("current_order", None)
+        context.user_data.pop("selected", None)
+        await query.edit_message_text(
+            pizza_text(user_id),
+            parse_mode="Markdown",
+            reply_markup=pizza_menu(user_id)
+        )
+
+    elif data == "pizza_upgrades":
+        await query.edit_message_text(
+            "🏭 **Улучшения**\n\n(Функция в разработке)",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Назад", callback_data="pizza_menu")]
+            ])
+        )
+
+    elif data == "pizza_stats":
+        u = get_user(user_id)
+        await query.edit_message_text(
+            f"📊 **Статистика**\n\n"
+            f"🍕 Всего заказов: {u['orders']}\n"
+            f"✅ Успешных: {u['success']}\n"
+            f"❌ Провальных: {u['fail']}\n"
+            f"💰 Заработано: {u['balance']} монет",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 Назад", callback_data="pizza_menu")]
+            ])
         )
 
     elif data == "back_main":
-        await query.edit_message_text("👋 Выберите действие:", reply_markup=main_menu(context.bot.username))
-
-    elif data == "games":
-        if chat.type == "private":
-            await query.edit_message_text(
-                "❌ Игры доступны только в чате!",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("➕ Добавить бота в чат", url=f"https://t.me/{context.bot.username}?startgroup=true")]
-                ])
-            )
-        else:
-            await query.edit_message_text("🎮 Выберите игру:", reply_markup=games_menu())
-
-    elif data == "cubs_start":
-        await query.edit_message_text("🎲 Напишите /cubs в ответ на сообщение человека.")
-
-    elif data.startswith("cubs_accept_"):
-        parts = data.split("_")
-        challenger_id = int(parts[2])
-        target_id = int(parts[3])
-        user_id = update.effective_user.id
-        if target_id != 0 and user_id != target_id:
-            await query.answer("Этот вызов не для тебя.", show_alert=True)
-            return
-        if user_id == challenger_id:
-            await query.answer("Нельзя играть с самим собой.", show_alert=True)
-            return
-
-        try:
-            c1 = await context.bot.get_chat(challenger_id)
-            c2 = await context.bot.get_chat(user_id)
-            name1 = c1.first_name or "Игрок 1"
-            name2 = c2.first_name or "Игрок 2"
-        except Exception:
-            name1 = "Игрок 1"
-            name2 = "Игрок 2"
-
-        await query.edit_message_text("🎲 Кидаем кубики...")
-
-        d1 = await context.bot.send_dice(chat_id=chat.id, emoji="🎲")
-        v1 = d1.dice.value
-        await context.bot.send_message(chat.id, f"🎲 {name1} выпало: {v1}")
-
-        d2 = await context.bot.send_dice(chat_id=chat.id, emoji="🎲")
-        v2 = d2.dice.value
-        await context.bot.send_message(chat.id, f"🎲 {name2} выпало: {v2}")
-
-        if v1 > v2:
-            result = f"🏆 Победил {name1}!"
-        elif v2 > v1:
-            result = f"🏆 Победил {name2}!"
-        else:
-            result = "🤝 Ничья!"
-
-        await context.bot.send_message(
-            chat.id,
-            f"🎲 **Результаты дуэли:**\n• {name1}: {v1}\n• {name2}: {v2}\n\n{result}",
-            parse_mode="Markdown"
-        )
-
-# ===== КОМАНДЫ =====
-async def cubs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.type == "private":
-        await update.message.reply_text(
-            "❌ Игры доступны только в чате!",
+        await query.edit_message_text(
+            "👋 Выберите действие:",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("➕ Добавить бота в чат", url=f"https://t.me/{context.bot.username}?startgroup=true")]
-            ])
-        )
-        return
-    user_id = update.effective_user.id
-    message = update.message
-    if message.reply_to_message:
-        opponent = message.reply_to_message.from_user
-        if opponent.id == user_id:
-            await message.reply_text("Нельзя играть с самим собой.")
-            return
-        await message.reply_text(
-            f"🎲 {message.from_user.first_name} вызывает {opponent.first_name}!\n\n{opponent.first_name}, принимаешь вызов?",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Принять", callback_data=f"cubs_accept_{user_id}_{opponent.id}")]
-            ])
-        )
-    else:
-        await message.reply_text(
-            f"🎲 {message.from_user.first_name} вызывает всех!\n\nКто примет вызов?",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Принять", callback_data=f"cubs_accept_{user_id}_0")]
+                [InlineKeyboardButton("🍕 Пиццерия", callback_data="pizza_menu")],
             ])
         )
 
-# ===== ТЕКСТ =====
-async def text_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = update.message
-    text = message.text
-    chat = update.effective_chat
+    elif data == "noop":
+        await query.answer()
 
-    if message.reply_to_message and message.reply_to_message.from_user.id == context.bot.id:
-        s = get_settings(settings_key(chat))
-
-        if s["mode"] == "abdul" and is_abdul_trigger(text):
-            s_copy = {"mode": "abdul", "mat": True, "emoji": True}
-            prompt = build_prompt(s_copy)
-        else:
-            prompt = build_prompt(s)
-
-        anim_msg = await message.reply_text("⏳ ИИ думает...")
-
-        try:
-            completion = client.chat.completions.create(
-                model="deepseek/deepseek-v4-flash",
-                messages=[
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": text}
-                ],
-            )
-            answer = completion.choices[0].message.content
-            if not answer:
-                answer = "Пустой ответ от ИИ."
-        except Exception as e:
-            print(f"ОШИБКА ИИ: {e}")
-            answer = f"Ошибка ИИ: {e}"
-
-        try:
-            await anim_msg.delete()
-        except Exception:
-            pass
-
-        await message.reply_text(answer[:350])
-        return
-
-    text_lower = text.lower()
-    if text_lower in ["кубы", "кубики"]:
-        await cubs_command(update, context)
-
-# ===== ЗАПУСК (WEBHOOK) =====
+# ===== ЗАПУСК =====
 def main():
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("ai", ai_command))
-    application.add_handler(CommandHandler("cubs", cubs_command))
     application.add_handler(CallbackQueryHandler(button_handler))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_commands))
 
     PORT = int(os.environ.get("PORT", 8443))
     WEBHOOK_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://sanyabot-gdx4.onrender.com")
