@@ -561,7 +561,6 @@ async def cubs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 # ===== ТЕКСТ =====
-# promocodes: {КОД: ("money", сумма)} или {КОД: ("premium", дни)}
 promocodes = {}
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -633,4 +632,21 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"❌ Ошибка: {e}")
         elif action == "broadcast":
             sent = 0
-            for uid
+            for uid in users:
+                try:
+                    await context.bot.send_message(uid, f"📢 {update.message.text}")
+                    sent += 1
+                except Exception:
+                    pass
+            await update.message.reply_text(f"✅ Рассылка отправлена {sent} пользователям.")
+        return
+
+    # Промокоды
+    code = text.upper()
+    if code in promocodes:
+        ptype, value = promocodes.pop(code)
+        if ptype == "money":
+            u["balance"] += value
+            await update.message.reply_text(f"🎁 Промокод активирован! +{format_money(value)} монет.")
+        elif ptype == "premium":
+            until = datetime.now() + timed
