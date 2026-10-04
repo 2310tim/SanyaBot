@@ -152,7 +152,7 @@ def ai_menu(chat):
     mode_icons = {"normal": "😊", "evil": "😈", "rude": "🤬", "abdul": "🐈"}
     mode_names = {"normal": "Обычный", "evil": "Злой", "rude": "Грубый", "abdul": "Абдул"}
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"{mode_icons[s['mode']]} Режим: {mode_names[s['mode']]}", callback_data="ai_mode")],
+        [InlineKeyboardButton(f"{mode_icons[s['mode']]} Режим: {mode_names[s['mode']}", callback_data="ai_mode")],
         [InlineKeyboardButton(f"{mat_icon} Маты", callback_data="ai_toggle_mat")],
         [InlineKeyboardButton(f"{emoji_icon} Смайлики", callback_data="ai_toggle_emoji")],
         [InlineKeyboardButton("🔙 Назад", callback_data="back_main")],
@@ -530,9 +530,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rows = cursor.fetchall()
         text = "🏆 **ТОП-10 ИГРОКОВ**\n\n"
         for i, row in enumerate(rows, 1):
-            udata = {
-                "user_id": row[0], "balance": row[1], "premium_until": row[6], "name": row[8]
-            }
+            udata = {"user_id": row[0], "balance": row[1], "premium_until": row[6], "name": row[8]}
             premium = "💎 " if is_premium(udata) else ""
             name = udata.get("name") or f"Игрок {udata['user_id']}"
             text += f"{i}. {premium}{name} — {format_money(udata['balance'])} монет\n"
@@ -901,16 +899,8 @@ def main():
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
-    PORT = int(os.environ.get("PORT", 8443))
-    WEBHOOK_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://sanyabot-gdx4.onrender.com")
-
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path="/webhook",
-        webhook_url=f"{WEBHOOK_URL}/webhook",
-        drop_pending_updates=True,
-    )
+    print("Бот запущен через polling!")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
