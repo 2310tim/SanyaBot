@@ -1,3 +1,2 @@
 python-telegram-bot[webhooks]==20.7
 openai
-supabase==2.3.4
