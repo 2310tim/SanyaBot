@@ -85,7 +85,7 @@ def ai_menu(chat):
     mode_icons = {"normal": "😊", "evil": "😈", "rude": "🤬", "abdul": "🐈"}
     mode_names = {"normal": "Обычный", "evil": "Злой", "rude": "Грубый", "abdul": "Абдул"}
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"{mode_icons[s['mode']]} Режим: {mode_names[s['mode']}", callback_data="ai_mode")],
+        [InlineKeyboardButton(f"{mode_icons[s['mode']]} Режим: {mode_names[s['mode']]}", callback_data="ai_mode")],
         [InlineKeyboardButton(f"{mat_icon} Маты", callback_data="ai_toggle_mat")],
         [InlineKeyboardButton(f"{emoji_icon} Смайлики", callback_data="ai_toggle_emoji")],
         [InlineKeyboardButton("🔙 Назад", callback_data="back_main")],
@@ -136,7 +136,7 @@ def pizza_text(user_id):
     premium = "💎 " if u["premium"] else ""
     return (
         f"🍕 **ПИЦЦЕРИЯ**\n\n"
-        f"{premium}Баланс: {format_money(u['balance'])} монет\n"
+        f"{premium}💰 Баланс: {format_money(u['balance'])} монет\n"
         f"⭐ Уровень: {lvl['name']}\n"
         f"👥 Заказов: {u['orders']}\n"
     )
@@ -637,4 +637,12 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("ai", ai_command))
     application.add_handler(CommandHandler("cubs", cubs_command))
-    application.add
+    application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+
+    PORT = int(os.environ.get("PORT", 8443))
+    WEBHOOK_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://sanyabot-gdx4.onrender.com")
+
+    application.run_webhook(
+        listen="0.0.0.0",
+        port
