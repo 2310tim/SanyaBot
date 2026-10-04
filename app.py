@@ -1,6 +1,7 @@
 import os
 import random
 import asyncio
+from datetime import datetime, timedelta
 from openai import OpenAI
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
@@ -32,6 +33,11 @@ def format_money(amount):
         return f"{amount / 1_000:.1f}к".replace(".0к", "к")
     else:
         return str(amount)
+
+def is_premium(u):
+    if not u.get("premium_until"):
+        return False
+    return datetime.now() < u["premium_until"]
 
 # ===== НАСТРОЙКИ ИИ =====
 settings = {}
@@ -98,7 +104,7 @@ def get_user(user_id):
     if user_id not in users:
         users[user_id] = {
             "balance": 0, "level": 1, "orders": 0, "success": 0, "fail": 0,
-            "premium": False, "banned": False, "name": ""
+            "premium_until": None, "banned": False, "name": ""
         }
     return users[user_id]
 
@@ -133,7 +139,7 @@ def pizza_menu(user_id):
 def pizza_text(user_id):
     u = get_user(user_id)
     lvl = LEVELS[u["level"]]
-    premium = "💎 " if u["premium"] else ""
+    premium = "💎 " if is_premium(u) else ""
     return (
         f"🍕 **ПИЦЦЕРИЯ**\n\n"
         f"{premium}💰 Баланс: {format_money(u['balance'])} монет\n"
@@ -409,7 +415,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sorted_users = sorted(users.items(), key=lambda x: x[1]["balance"], reverse=True)[:10]
         text = "🏆 **ТОП-10 ИГРОКОВ**\n\n"
         for i, (uid, udata) in enumerate(sorted_users, 1):
-            premium = "💎 " if udata.get("premium") else ""
+            premium = "💎 " if is_premium(udata) else ""
             name = udata.get("name") or f"Игрок {uid}"
             text += f"{i}. {premium}{name} — {format_money(udata['balance'])} монет\n"
         await query.edit_message_text(
@@ -428,6 +434,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("📊 Статистика", callback_data="admin_stats")],
                 [InlineKeyboardButton("💰 Выдать монеты", callback_data="admin_give")],
+                [InlineKeyboardButton("💎 Выдать премиум", callback_data="admin_premium")],
+                [InlineKeyboardButton("📋 Все ID", callback_data="admin_ids")],
                 [InlineKeyboardButton("🚫 Бан/Разбан", callback_data="admin_ban")],
                 [InlineKeyboardButton("🎁 Промокоды", callback_data="admin_promo")],
                 [InlineKeyboardButton("📢 Рассылка", callback_data="admin_broadcast")],
@@ -438,7 +446,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_id != ADMIN_ID:
             return
         total = len(users)
-        premium_count = sum(1 for u in users.values() if u.get("premium"))
+        premium_count = sum(1 for u in users.values() if is_premium(u))
         banned_count = sum(1 for u in users.values() if u.get("banned"))
         total_money = sum(u["balance"] for u in users.values())
         await query.edit_message_text(
@@ -450,5 +458,179 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="admin_panel")]])
         )
+    elif data == "admin_ids":
+        if user_id != ADMIN_ID:
+            return
+        text = "📋 **Все ID**\n\n"
+        for uid, udata in users.items():
+            premium = "💎 " if is_premium(udata) else ""
+            name = udata.get("name") or "Без имени"
+            text += f"{premium}{name} — `{uid}`\n"
+        if len(text) > 4000:
+            text = text[:4000] + "\n\n... (список обрезан)"
+        await query.edit_message_text(
+            text, parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="admin_panel")]])
+        )
     elif data == "admin_give":
-        if user_id != A
+        if user_id != ADMIN_ID:
+            return
+        await query.edit_message_text(
+            "💰 **Выдать монеты**\n\nОтправь сообщение в формате:\n`ID сумма`\n\nНапример: `123456789 1000`",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="admin_panel")]])
+        )
+        context.user_data["admin_action"] = "give"
+    elif data == "admin_premium":
+        if user_id != ADMIN_ID:
+            return
+        await query.edit_message_text(
+            "💎 **Выдать премиум**\n\nОтправь сообщение в формате:\n`ID дни`\n\nНапример: `123456789 30`",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="admin_panel")]])
+        )
+        context.user_data["admin_action"] = "premium"
+    elif data == "admin_ban":
+        if user_id != ADMIN_ID:
+            return
+        await query.edit_message_text(
+            "🚫 **Бан/Разбан**\n\nОтправь сообщение в формате:\n`ID бан` или `ID разбан`",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="admin_panel")]])
+        )
+        context.user_data["admin_action"] = "ban"
+    elif data == "admin_promo":
+        if user_id != ADMIN_ID:
+            return
+        await query.edit_message_text(
+            "🎁 **Промокоды**\n\n"
+            "Форматы:\n"
+            "`КОД сумма` — выдаёт монеты\n"
+            "`КОД премиум дни` — выдаёт премиум\n\n"
+            "Примеры:\n"
+            "`SANYA 1000`\n"
+            "`PREMIUM премиум 30`",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="admin_panel")]])
+        )
+        context.user_data["admin_action"] = "promo"
+    elif data == "admin_broadcast":
+        if user_id != ADMIN_ID:
+            return
+        await query.edit_message_text(
+            "📢 **Рассылка**\n\nОтправь текст, который хочешь разослать всем пользователям.",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="admin_panel")]])
+        )
+        context.user_data["admin_action"] = "broadcast"
+
+    # ---- НАЗАД ----
+    elif data == "back_main":
+        await query.edit_message_text(
+            "👋 Выберите действие:",
+            reply_markup=main_menu(context.bot.username, user_id)
+        )
+
+    elif data == "noop":
+        await query.answer()
+
+# ===== КОМАНДЫ =====
+async def cubs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type == "private":
+        await update.message.reply_text("❌ Игры доступны только в чате!")
+        return
+    user_id = update.effective_user.id
+    message = update.message
+    if message.reply_to_message:
+        opponent = message.reply_to_message.from_user
+        if opponent.id == user_id:
+            await message.reply_text("Нельзя играть с самим собой.")
+            return
+        await message.reply_text(
+            f"🎲 {message.from_user.first_name} вызывает {opponent.first_name}!\n\n{opponent.first_name}, принимаешь вызов?",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Принять", callback_data=f"cubs_accept_{user_id}_{opponent.id}")]
+            ])
+        )
+    else:
+        await message.reply_text(
+            f"🎲 {message.from_user.first_name} вызывает всех!\n\nКто примет вызов?",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Принять", callback_data=f"cubs_accept_{user_id}_0")]
+            ])
+        )
+
+# ===== ТЕКСТ =====
+# promocodes: {КОД: ("money", сумма)} или {КОД: ("premium", дни)}
+promocodes = {}
+
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    text_lower = text.lower()
+    chat = update.effective_chat
+    user_id = update.effective_user.id
+    u = get_user(user_id)
+
+    # Админ-действия
+    if user_id == ADMIN_ID and context.user_data.get("admin_action"):
+        action = context.user_data.pop("admin_action")
+        if action == "give":
+            try:
+                parts = text_lower.split()
+                target_id = int(parts[0])
+                amount = int(parts[1])
+                if target_id in users:
+                    users[target_id]["balance"] += amount
+                    await update.message.reply_text(f"✅ Выдано {format_money(amount)} монет пользователю {target_id}")
+                else:
+                    await update.message.reply_text("❌ Пользователь не найден.")
+            except Exception as e:
+                await update.message.reply_text(f"❌ Ошибка: {e}")
+        elif action == "premium":
+            try:
+                parts = text_lower.split()
+                target_id = int(parts[0])
+                days = int(parts[1])
+                if target_id in users:
+                    until = datetime.now() + timedelta(days=days)
+                    users[target_id]["premium_until"] = until
+                    await update.message.reply_text(
+                        f"✅ Премиум выдан пользователю {target_id} до {until.strftime('%d.%m.%Y %H:%M')}"
+                    )
+                else:
+                    await update.message.reply_text("❌ Пользователь не найден.")
+            except Exception as e:
+                await update.message.reply_text(f"❌ Ошибка: {e}")
+        elif action == "ban":
+            try:
+                parts = text_lower.split()
+                target_id = int(parts[0])
+                action_type = parts[1]
+                if target_id in users:
+                    if action_type == "бан":
+                        users[target_id]["banned"] = True
+                        await update.message.reply_text(f"✅ Пользователь {target_id} забанен.")
+                    elif action_type == "разбан":
+                        users[target_id]["banned"] = False
+                        await update.message.reply_text(f"✅ Пользователь {target_id} разбанен.")
+                else:
+                    await update.message.reply_text("❌ Пользователь не найден.")
+            except Exception as e:
+                await update.message.reply_text(f"❌ Ошибка: {e}")
+        elif action == "promo":
+            try:
+                parts = text.split()
+                code = parts[0].upper()
+                if parts[1].lower() == "премиум":
+                    days = int(parts[2])
+                    promocodes[code] = ("premium", days)
+                    await update.message.reply_text(f"✅ Промокод {code} создан: премиум на {days} дней.")
+                else:
+                    amount = int(parts[1])
+                    promocodes[code] = ("money", amount)
+                    await update.message.reply_text(f"✅ Промокод {code} создан на {format_money(amount)} монет.")
+            except Exception as e:
+                await update.message.reply_text(f"❌ Ошибка: {e}")
+        elif action == "broadcast":
+            sent = 0
+            for uid
