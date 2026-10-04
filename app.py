@@ -89,7 +89,7 @@ def ai_menu(chat):
     mode_icons = {"normal": "😊", "evil": "😈", "rude": "🤬", "abdul": "🐈"}
     mode_names = {"normal": "Обычный", "evil": "Злой", "rude": "Грубый", "abdul": "Абдул"}
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"{mode_icons[s['mode']]} Режим: {mode_names[s['mode']]}", callback_data="ai_mode")],
+        [InlineKeyboardButton(f"{mode_icons[s['mode']]} Режим: {mode_names[s['mode']}", callback_data="ai_mode")],
         [InlineKeyboardButton(f"{mat_icon} Маты", callback_data="ai_toggle_mat")],
         [InlineKeyboardButton(f"{emoji_icon} Смайлики", callback_data="ai_toggle_emoji")],
         [InlineKeyboardButton("🔙 Назад", callback_data="back_main")],
@@ -197,6 +197,7 @@ def main_menu(username, user_id):
         [InlineKeyboardButton("🍕 Пиццерия", callback_data="pizza_menu")],
         [InlineKeyboardButton("🎲 Кубы", callback_data="cubs_start")],
         [InlineKeyboardButton("🛒 Магазин", callback_data="shop")],
+        [InlineKeyboardButton("🎁 Промокоды", callback_data="promo_menu")],
         [InlineKeyboardButton("🏆 Топ игроков", callback_data="top")],
         [InlineKeyboardButton("➕ Добавить бота в чат", url=f"https://t.me/{username}?startgroup=true")],
     ]
@@ -399,6 +400,29 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="back_main")]])
         )
+    elif data == "promo_menu":
+        await query.edit_message_text(
+            "🎁 **ПРОМОКОДЫ**\n\n"
+            "Введи промокод в чат, чтобы активировать его.\n\n"
+            "Или создай свой промокод за монеты.",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("➕ Создать промокод", callback_data="promo_create")],
+                [InlineKeyboardButton("🔙 Назад", callback_data="back_main")],
+            ])
+        )
+    elif data == "promo_create":
+        await query.edit_message_text(
+            "➕ **Создание промокода**\n\n"
+            "Отправь сообщение в формате:\n"
+            "`КОД сумма количество`\n\n"
+            "Например: `SANYA 100 5`\n\n"
+            "Это значит: промокод SANYA даст 100 монет, 5 активаций.\n"
+            "С твоего баланса спишется 500 монет.",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="promo_menu")]])
+        )
+        context.user_data["promo_create"] = True
     elif data == "top":
         sorted_users = sorted(users.items(), key=lambda x: x[1]["balance"], reverse=True)[:10]
         text = "🏆 **ТОП-10 ИГРОКОВ**\n\n"
@@ -491,11 +515,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             "🎁 **Промокоды**\n\n"
             "Форматы:\n"
-            "`КОД сумма` — выдаёт монеты\n"
-            "`КОД премиум дни` — выдаёт премиум\n\n"
+            "`КОД сумма количество` — выдаёт монеты\n"
+            "`КОД премиум дни количество` — выдаёт премиум\n\n"
             "Примеры:\n"
-            "`SANYA 1000`\n"
-            "`PREMIUM премиум 30`",
+            "`SANYA 1000 10`\n"
+            "`PREMIUM премиум 30 5`",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="admin_panel")]])
         )
@@ -602,12 +626,14 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 code = parts[0].upper()
                 if parts[1].lower() == "премиум":
                     days = int(parts[2])
-                    promocodes[code] = ("premium", days)
-                    await update.message.reply_text(f"✅ Промокод {code} создан: премиум на {days} дней.")
+                    uses = int(parts[3])
+                    promocodes[code] = {"type": "premium", "value": days, "uses": uses}
+                    await update.message.reply_text(f"✅ Промокод {code} создан: премиум на {days} дней, {uses} активаций.")
                 else:
                     amount = int(parts[1])
-                    promocodes[code] = ("money", amount)
-                    await update.message.reply_text(f"✅ Промокод {code} создан на {format_money(amount)} монет.")
+                    uses = int(parts[2])
+                    promocodes[code] = {"type": "money", "value": amount, "uses": uses}
+                    await update.message.reply_text(f"✅ Промокод {code} создан на {format_money(amount)} монет, {uses} активаций.")
             except Exception as e:
                 await update.message.reply_text(f"❌ Ошибка: {e}")
         elif action == "broadcast":
@@ -621,16 +647,40 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"✅ Рассылка отправлена {sent} пользователям.")
         return
 
+    # Создание промокода игроком
+    if context.user_data.get("promo_create"):
+        try:
+            parts = text_lower.split()
+            code = parts[0].upper()
+            amount = int(parts[1])
+            uses = int(parts[2])
+            total = amount * uses
+            if u["balance"] < total:
+                await update.message.reply_text(f"❌ Недостаточно монет! Нужно {format_money(total)}, у тебя {format_money(u['balance'])}.")
+                context.user_data.pop("promo_create", None)
+                return
+            u["balance"] -= total
+            promocodes[code] = {"type": "money", "value": amount, "uses": uses}
+            await update.message.reply_text(f"✅ Промокод {code} создан: {format_money(amount)} монет, {uses} активаций. Списано {format_money(total)} монет.")
+            context.user_data.pop("promo_create", None)
+        except Exception as e:
+            await update.message.reply_text(f"❌ Ошибка: {e}")
+            context.user_data.pop("promo_create", None)
+        return
+
     code = text.upper()
     if code in promocodes:
-        ptype, value = promocodes.pop(code)
-        if ptype == "money":
-            u["balance"] += value
-            await update.message.reply_text(f"🎁 Промокод активирован! +{format_money(value)} монет.")
-        elif ptype == "premium":
-            until = datetime.now() + timedelta(days=value)
+        p = promocodes[code]
+        if p["type"] == "money":
+            u["balance"] += p["value"]
+            await update.message.reply_text(f"🎁 Промокод активирован! +{format_money(p['value'])} монет.")
+        elif p["type"] == "premium":
+            until = datetime.now() + timedelta(days=p["value"])
             u["premium_until"] = until
             await update.message.reply_text(f"🎁 Промокод активирован! Премиум до {until.strftime('%d.%m.%Y %H:%M')}.")
+        p["uses"] -= 1
+        if p["uses"] <= 0:
+            del promocodes[code]
         return
 
     if text_lower in ["пицца", "пиццерия"]:
