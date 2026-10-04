@@ -23,7 +23,6 @@ client = OpenAI(
     api_key=DEEPSEEK_KEY,
 )
 
-# ===== ФОРМАТИРОВАНИЕ =====
 def format_money(amount):
     if amount >= 1_000_000_000:
         return f"{amount / 1_000_000_000:.1f}ккк".replace(".0ккк", "ккк")
@@ -39,7 +38,6 @@ def is_premium(u):
         return False
     return datetime.now() < u["premium_until"]
 
-# ===== НАСТРОЙКИ ИИ =====
 settings = {}
 
 def get_settings(key):
@@ -97,7 +95,6 @@ def ai_menu(chat):
         [InlineKeyboardButton("🔙 Назад", callback_data="back_main")],
     ])
 
-# ===== ПИЦЦЕРИЯ =====
 users = {}
 
 def get_user(user_id):
@@ -227,7 +224,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     u = get_user(user_id)
 
-    # ---- ИИ ----
     if data == "ai":
         await query.edit_message_text("🤖 Настройки ИИ:", reply_markup=ai_menu(chat))
     elif data == "ai_mode":
@@ -245,8 +241,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         s = get_settings(settings_key(chat))
         s["emoji"] = not s["emoji"]
         await query.edit_message_text(f"Смайлики: {'включены ✅' if s['emoji'] else 'выключены ❌'}", reply_markup=ai_menu(chat))
-
-    # ---- ПИЦЦЕРИЯ ----
     elif data == "pizza_menu":
         await query.edit_message_text(pizza_text(user_id), parse_mode="Markdown", reply_markup=pizza_menu(user_id))
     elif data == "pizza_order":
@@ -365,8 +359,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="pizza_menu")]])
         )
-
-    # ---- КУБЫ ----
     elif data == "cubs_start":
         await query.edit_message_text("🎲 Напишите /cubs или «кубы» в ответ на сообщение человека.")
     elif data.startswith("cubs_accept_"):
@@ -401,16 +393,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             result = "🤝 Ничья!"
         await context.bot.send_message(chat.id, f"🎲 **Результаты дуэли:**\n• {name1}: {v1}\n• {name2}: {v2}\n\n{result}", parse_mode="Markdown")
-
-    # ---- МАГАЗИН ----
     elif data == "shop":
         await query.edit_message_text(
             "🛒 **МАГАЗИН**\n\n(Функция в разработке)",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="back_main")]])
         )
-
-    # ---- ТОП ИГРОКОВ ----
     elif data == "top":
         sorted_users = sorted(users.items(), key=lambda x: x[1]["balance"], reverse=True)[:10]
         text = "🏆 **ТОП-10 ИГРОКОВ**\n\n"
@@ -422,8 +410,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text, parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="back_main")]])
         )
-
-    # ---- АДМИН-ПАНЕЛЬ ----
     elif data == "admin_panel":
         if user_id != ADMIN_ID:
             await query.answer("Нет доступа.", show_alert=True)
@@ -523,18 +509,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="admin_panel")]])
         )
         context.user_data["admin_action"] = "broadcast"
-
-    # ---- НАЗАД ----
     elif data == "back_main":
         await query.edit_message_text(
             "👋 Выберите действие:",
             reply_markup=main_menu(context.bot.username, user_id)
         )
-
     elif data == "noop":
         await query.answer()
 
-# ===== КОМАНДЫ =====
 async def cubs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == "private":
         await update.message.reply_text("❌ Игры доступны только в чате!")
@@ -560,7 +542,6 @@ async def cubs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ])
         )
 
-# ===== ТЕКСТ =====
 promocodes = {}
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -570,7 +551,6 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     u = get_user(user_id)
 
-    # Админ-действия
     if user_id == ADMIN_ID and context.user_data.get("admin_action"):
         action = context.user_data.pop("admin_action")
         if action == "give":
@@ -641,7 +621,6 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"✅ Рассылка отправлена {sent} пользователям.")
         return
 
-    # Промокоды
     code = text.upper()
     if code in promocodes:
         ptype, value = promocodes.pop(code)
@@ -649,4 +628,71 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             u["balance"] += value
             await update.message.reply_text(f"🎁 Промокод активирован! +{format_money(value)} монет.")
         elif ptype == "premium":
-            until = datetime.now() + timed
+            until = datetime.now() + timedelta(days=value)
+            u["premium_until"] = until
+            await update.message.reply_text(f"🎁 Промокод активирован! Премиум до {until.strftime('%d.%m.%Y %H:%M')}.")
+        return
+
+    if text_lower in ["пицца", "пиццерия"]:
+        await update.message.reply_text(pizza_text(user_id), parse_mode="Markdown", reply_markup=pizza_menu(user_id))
+    elif text_lower in ["кубы", "кубики"]:
+        await cubs_command(update, context)
+    elif text_lower in ["ии", "нейросеть"]:
+        await update.message.reply_text("🤖 Настройки ИИ:", reply_markup=ai_menu(chat))
+    elif text_lower == "топ":
+        sorted_users = sorted(users.items(), key=lambda x: x[1]["balance"], reverse=True)[:10]
+        result = "🏆 **ТОП-10 ИГРОКОВ**\n\n"
+        for i, (uid, udata) in enumerate(sorted_users, 1):
+            premium = "💎 " if is_premium(udata) else ""
+            name = udata.get("name") or f"Игрок {uid}"
+            result += f"{i}. {premium}{name} — {format_money(udata['balance'])} монет\n"
+        await update.message.reply_text(result, parse_mode="Markdown")
+    elif update.message.reply_to_message and update.message.reply_to_message.from_user.id == context.bot.id:
+        s = get_settings(settings_key(chat))
+        if s["mode"] == "abdul" and is_abdul_trigger(text):
+            s_copy = {"mode": "abdul", "mat": True, "emoji": True}
+            prompt = build_prompt(s_copy)
+        else:
+            prompt = build_prompt(s)
+        anim_msg = await update.message.reply_text("⏳ ИИ думает...")
+        try:
+            completion = client.chat.completions.create(
+                model="deepseek/deepseek-v4-flash",
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": text}
+                ],
+            )
+            answer = completion.choices[0].message.content
+            if not answer:
+                answer = "Пустой ответ от ИИ."
+        except Exception as e:
+            print(f"ОШИБКА ИИ: {e}")
+            answer = f"Ошибка ИИ: {e}"
+        try:
+            await anim_msg.delete()
+        except Exception:
+            pass
+        await update.message.reply_text(answer[:350])
+
+def main():
+    application = Application.builder().token(TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("ai", ai_command))
+    application.add_handler(CommandHandler("cubs", cubs_command))
+    application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+
+    PORT = int(os.environ.get("PORT", 8443))
+    WEBHOOK_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://sanyabot-gdx4.onrender.com")
+
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path="/webhook",
+        webhook_url=f"{WEBHOOK_URL}/webhook",
+        drop_pending_updates=True,
+    )
+
+if __name__ == "__main__":
+    main()
