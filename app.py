@@ -3,6 +3,7 @@ import random
 import asyncio
 from datetime import datetime, timedelta
 from openai import OpenAI
+from supabase import create_client
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
@@ -22,6 +23,10 @@ CHANNEL_ID = os.getenv("CHANNEL_ID")
 if not CHANNEL_ID:
     raise ValueError("CHANNEL_ID не найден")
 
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
 client = OpenAI(
     base_url="https://apimira.com/v1",
     api_key=DEEPSEEK_KEY,
@@ -40,7 +45,10 @@ def format_money(amount):
 def is_premium(u):
     if not u.get("premium_until"):
         return False
-    return datetime.now() < u["premium_until"]
+    pu = u["premium_until"]
+    if isinstance(pu, str):
+        pu = datetime.fromisoformat(pu.replace("Z", "+00:00"))
+    return datetime.now(pu.tzinfo) < pu
 
 async def check_subscription(context, user_id):
     try:
@@ -50,8 +58,31 @@ async def check_subscription(context, user_id):
         print(f"Ошибка проверки подписки: {e}")
         return False
 
+def get_user(user_id):
+    response = supabase.table("users").select("*").eq("user_id", user_id).execute()
+    if response.data:
+        return response.data[0]
+    else:
+        new_user = {
+            "user_id": user_id,
+            "balance": 0,
+            "level": 1,
+            "orders": 0,
+            "success": 0,
+            "fail": 0,
+            "premium_until": None,
+            "banned": False,
+            "name": ""
+        }
+        supabase.table("users").insert(new_user).execute()
+        return new_user
+
+def update_user(user_id, **kwargs):
+    supabase.table("users").update(kwargs).eq("user_id", user_id).execute()
+
 def is_bot_started(user_id):
-    return user_id in users
+    response = supabase.table("users").select("user_id").eq("user_id", user_id).execute()
+    return bool(response.data)
 
 settings = {}
 
@@ -104,7 +135,7 @@ def ai_menu(chat):
     mode_icons = {"normal": "😊", "evil": "😈", "rude": "🤬", "abdul": "🐈"}
     mode_names = {"normal": "Обычный", "evil": "Злой", "rude": "Грубый", "abdul": "Абдул"}
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"{mode_icons[s['mode']]} Режим: {mode_names[s['mode']]}", callback_data="ai_mode")],
+        [InlineKeyboardButton(f"{mode_icons[s['mode']]} Режим: {mode_names[s['mode']}", callback_data="ai_mode")],
         [InlineKeyboardButton(f"{mat_icon} Маты", callback_data="ai_toggle_mat")],
         [InlineKeyboardButton(f"{emoji_icon} Смайлики", callback_data="ai_toggle_emoji")],
         [InlineKeyboardButton("🔙 Назад", callback_data="back_main")],
@@ -115,16 +146,6 @@ def sub_menu():
         [InlineKeyboardButton("📢 Подписаться", url=f"https://t.me/{CHANNEL_ID.replace('@', '')}")],
         [InlineKeyboardButton("✅ Я подписался", callback_data="check_sub")],
     ])
-
-users = {}
-
-def get_user(user_id):
-    if user_id not in users:
-        users[user_id] = {
-            "balance": 0, "level": 1, "orders": 0, "success": 0, "fail": 0,
-            "premium_until": None, "banned": False, "name": ""
-        }
-    return users[user_id]
 
 LEVELS = {
     1: {"name": "🏚 Гараж", "price": 0, "clients": 1, "ingredients": 2, "reward": 20},
@@ -229,7 +250,7 @@ def main_menu(username, user_id):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     u = get_user(user_id)
-    u["name"] = update.effective_user.first_name or "Без имени"
+    update_user(user_id, name=update.effective_user.first_name or "Без имени")
 
     if not await check_subscription(context, user_id):
         await update.message.reply_text(
@@ -264,7 +285,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user_id = update.effective_user.id
     chat = update.effective_chat
-    u = get_user(user_id)
 
     if data == "check_sub":
         if await check_subscription(context, user_id):
@@ -348,6 +368,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             correct = False
         if selected.get("cheese", []) != [ingredients["cheese"]]:
             correct = False
+        u = get_user(user_id)
         u["orders"] += 1
         lvl = LEVELS[u["level"]]
         if correct:
@@ -355,9 +376,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             u["balance"] += reward
             u["success"] += 1
             result_text = f"✅ **Заказ выполнен!**\n\nКлиент доволен 😊\nТы заработал: {format_money(reward)} монет"
+            update_user(user_id, orders=u["orders"], balance=u["balance"], success=u["success"])
         else:
             u["fail"] += 1
             result_text = "❌ **Клиент ушёл!**\n\nТы перепутал ингредиенты."
+            update_user(user_id, orders=u["orders"], fail=u["fail"])
         context.user_data.pop("current_order", None)
         context.user_data.pop("selected", None)
         await query.edit_message_text(
@@ -405,6 +428,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         u["balance"] -= next_lvl["price"]
         u["level"] += 1
+        update_user(user_id, balance=u["balance"], level=u["level"])
         await query.edit_message_text(
             f"✅ Пиццерия улучшена до {next_lvl['name']}!",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 В меню пиццерии", callback_data="pizza_menu")]])
@@ -485,11 +509,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         context.user_data["promo_create"] = True
     elif data == "top":
-        sorted_users = sorted(users.items(), key=lambda x: x[1]["balance"], reverse=True)[:10]
+        response = supabase.table("users").select("*").order("balance", desc=True).limit(10).execute()
         text = "🏆 **ТОП-10 ИГРОКОВ**\n\n"
-        for i, (uid, udata) in enumerate(sorted_users, 1):
+        for i, udata in enumerate(response.data, 1):
             premium = "💎 " if is_premium(udata) else ""
-            name = udata.get("name") or f"Игрок {uid}"
+            name = udata.get("name") or f"Игрок {udata['user_id']}"
             text += f"{i}. {premium}{name} — {format_money(udata['balance'])} монет\n"
         await query.edit_message_text(
             text, parse_mode="Markdown",
@@ -516,10 +540,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "admin_stats":
         if user_id != ADMIN_ID:
             return
-        total = len(users)
-        premium_count = sum(1 for u in users.values() if is_premium(u))
-        banned_count = sum(1 for u in users.values() if u.get("banned"))
-        total_money = sum(u["balance"] for u in users.values())
+        response = supabase.table("users").select("*").execute()
+        all_users = response.data
+        total = len(all_users)
+        premium_count = sum(1 for u in all_users if is_premium(u))
+        banned_count = sum(1 for u in all_users if u.get("banned"))
+        total_money = sum(u["balance"] for u in all_users)
         await query.edit_message_text(
             f"📊 **Статистика**\n\n"
             f"👥 Всего пользователей: {total}\n"
@@ -532,11 +558,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "admin_ids":
         if user_id != ADMIN_ID:
             return
+        response = supabase.table("users").select("*").execute()
         text = "📋 **Все ID**\n\n"
-        for uid, udata in users.items():
+        for udata in response.data:
             premium = "💎 " if is_premium(udata) else ""
             name = udata.get("name") or "Без имени"
-            text += f"{premium}{name} — `{uid}`\n"
+            text += f"{premium}{name} — `{udata['user_id']}`\n"
         if len(text) > 4000:
             text = text[:4000] + "\n\n... (список обрезан)"
         await query.edit_message_text(
@@ -658,7 +685,6 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text_lower = text.lower()
     chat = update.effective_chat
     user_id = update.effective_user.id
-    u = get_user(user_id)
 
     if user_id == ADMIN_ID and context.user_data.get("admin_action"):
         action = context.user_data.pop("admin_action")
@@ -667,8 +693,10 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parts = text_lower.split()
                 target_id = int(parts[0])
                 amount = int(parts[1])
-                if target_id in users:
-                    users[target_id]["balance"] += amount
+                if is_bot_started(target_id):
+                    response = supabase.table("users").select("balance").eq("user_id", target_id).execute()
+                    new_balance = response.data[0]["balance"] + amount
+                    update_user(target_id, balance=new_balance)
                     await update.message.reply_text(f"✅ Выдано {format_money(amount)} монет пользователю {target_id}")
                 else:
                     await update.message.reply_text("❌ Пользователь не найден.")
@@ -679,9 +707,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parts = text_lower.split()
                 target_id = int(parts[0])
                 days = int(parts[1])
-                if target_id in users:
+                if is_bot_started(target_id):
                     until = datetime.now() + timedelta(days=days)
-                    users[target_id]["premium_until"] = until
+                    update_user(target_id, premium_until=until.isoformat())
                     await update.message.reply_text(
                         f"✅ Премиум выдан пользователю {target_id} до {until.strftime('%d.%m.%Y %H:%M')}"
                     )
@@ -694,12 +722,12 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parts = text_lower.split()
                 target_id = int(parts[0])
                 action_type = parts[1]
-                if target_id in users:
+                if is_bot_started(target_id):
                     if action_type == "бан":
-                        users[target_id]["banned"] = True
+                        update_user(target_id, banned=True)
                         await update.message.reply_text(f"✅ Пользователь {target_id} забанен.")
                     elif action_type == "разбан":
-                        users[target_id]["banned"] = False
+                        update_user(target_id, banned=False)
                         await update.message.reply_text(f"✅ Пользователь {target_id} разбанен.")
                 else:
                     await update.message.reply_text("❌ Пользователь не найден.")
@@ -723,9 +751,10 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"❌ Ошибка: {e}")
         elif action == "broadcast":
             sent = 0
-            for uid in users:
+            response = supabase.table("users").select("user_id").execute()
+            for row in response.data:
                 try:
-                    await context.bot.send_message(uid, f"📢 {update.message.text}")
+                    await context.bot.send_message(row["user_id"], f"📢 {update.message.text}")
                     sent += 1
                 except Exception:
                     pass
@@ -738,11 +767,12 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             code = parts[0].upper()
             amount = int(parts[1])
             uses = 1
+            u = get_user(user_id)
             if u["balance"] < amount:
                 await update.message.reply_text(f"❌ Недостаточно монет! Нужно {format_money(amount)}, у тебя {format_money(u['balance'])}.")
                 context.user_data.pop("promo_create", None)
                 return
-            u["balance"] -= amount
+            update_user(user_id, balance=u["balance"] - amount)
             promocodes[code] = {"type": "money", "value": amount, "uses": uses}
             await update.message.reply_text(f"✅ Промокод {code} создан: {format_money(amount)} монет, 1 активация. Списано {format_money(amount)} монет.")
             context.user_data.pop("promo_create", None)
@@ -761,13 +791,14 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=sub_menu()
             )
             return
+        u = get_user(user_id)
         p = promocodes[code]
         if p["type"] == "money":
-            u["balance"] += p["value"]
+            update_user(user_id, balance=u["balance"] + p["value"])
             await update.message.reply_text(f"🎁 Промокод активирован! +{format_money(p['value'])} монет.")
         elif p["type"] == "premium":
             until = datetime.now() + timedelta(days=p["value"])
-            u["premium_until"] = until
+            update_user(user_id, premium_until=until.isoformat())
             await update.message.reply_text(f"🎁 Промокод активирован! Премиум до {until.strftime('%d.%m.%Y %H:%M')}.")
         p["uses"] -= 1
         if p["uses"] <= 0:
@@ -803,11 +834,11 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text_lower in ["ии", "нейросеть"]:
         await update.message.reply_text("🤖 Настройки ИИ:", reply_markup=ai_menu(chat))
     elif text_lower == "топ":
-        sorted_users = sorted(users.items(), key=lambda x: x[1]["balance"], reverse=True)[:10]
+        response = supabase.table("users").select("*").order("balance", desc=True).limit(10).execute()
         result = "🏆 **ТОП-10 ИГРОКОВ**\n\n"
-        for i, (uid, udata) in enumerate(sorted_users, 1):
+        for i, udata in enumerate(response.data, 1):
             premium = "💎 " if is_premium(udata) else ""
-            name = udata.get("name") or f"Игрок {uid}"
+            name = udata.get("name") or f"Игрок {udata['user_id']}"
             result += f"{i}. {premium}{name} — {format_money(udata['balance'])} монет\n"
         await update.message.reply_text(result, parse_mode="Markdown")
     elif update.message.reply_to_message and update.message.reply_to_message.from_user.id == context.bot.id:
