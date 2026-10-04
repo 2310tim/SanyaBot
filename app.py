@@ -1,7 +1,7 @@
 import os
 import random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TOKEN:
@@ -16,52 +16,51 @@ def get_user(user_id):
     return users[user_id]
 
 LEVELS = {
-    1: {"name": "Гараж", "min_ingredients": 2},
-    2: {"name": "Ларёк", "min_ingredients": 3},
-    3: {"name": "Кафе", "min_ingredients": 4},
-    4: {"name": "Ресторан", "min_ingredients": 5},
-    5: {"name": "Сеть", "min_ingredients": 6},
+    1: {"name": "🏚 Гараж", "price": 0, "clients": 1, "ingredients": 2, "reward": 20},
+    2: {"name": "🏪 Ларёк", "price": 500, "clients": 2, "ingredients": 3, "reward": 40},
+    3: {"name": "🏠 Пиццерия", "price": 2000, "clients": 3, "ingredients": 4, "reward": 80},
+    4: {"name": "🏢 Ресторан", "price": 10000, "clients": 5, "ingredients": 5, "reward": 160},
+    5: {"name": "🏙 Сеть пиццерий", "price": 50000, "clients": 10, "ingredients": 6, "reward": 320},
 }
 
-# Тесто — предложный падеж ("на чём?")
 DOUGH = ["Обычное", "Сырное", "Тонкое", "Пышное"]
 DOUGH_ACC = {"Обычное": "обычном", "Сырное": "сырном", "Тонкое": "тонком", "Пышное": "пышном"}
 
-# Соус — творительный падеж ("с чем?")
 SAUCE = ["Кетчуп", "Сырный", "Чесночный", "Барбекю"]
 SAUCE_ACC = {"Кетчуп": "кетчупом", "Сырный": "сырным", "Чесночный": "чесночным", "Барбекю": "барбекю"}
 
-# Начинка — творительный падеж ("с чем?")
 FILLING = ["Колбаса", "Пепперони", "Грибы", "Помидоры", "Оливки", "Курица"]
 FILLING_ACC = {"Колбаса": "колбасой", "Пепперони": "пепперони", "Грибы": "грибами", "Помидоры": "помидорами", "Оливки": "оливками", "Курица": "курицей"}
 
-# Сыр — творительный падеж ("с чем?")
 CHEESE = ["Моцарелла", "Чеддер", "Пармезан"]
 CHEESE_ACC = {"Моцарелла": "моцареллой", "Чеддер": "чеддером", "Пармезан": "пармезаном"}
 
 def pizza_menu(user_id):
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🍳 Обслужить клиента", callback_data="pizza_order")],
-        [InlineKeyboardButton("🏭 Улучшения", callback_data="pizza_upgrades")],
+        [InlineKeyboardButton("🏭 Развитие", callback_data="pizza_upgrades")],
         [InlineKeyboardButton("📊 Статистика", callback_data="pizza_stats")],
         [InlineKeyboardButton("🔙 Назад", callback_data="back_main")],
     ])
 
 def pizza_text(user_id):
     u = get_user(user_id)
+    lvl = LEVELS[u["level"]]
     return (
         f"🍕 **ПИЦЦЕРИЯ**\n\n"
         f"💰 Баланс: {u['balance']} монет\n"
-        f"⭐ Уровень: {u['level']} ({LEVELS[u['level']]['name']})\n"
+        f"⭐ Уровень: {lvl['name']}\n"
         f"👥 Заказов: {u['orders']}\n"
     )
 
 def generate_order(user_id):
     u = get_user(user_id)
+    lvl = LEVELS[u["level"]]
+    max_ing = lvl["ingredients"]
     ingredients = {
         "dough": random.choice(DOUGH),
         "sauce": random.choice(SAUCE),
-        "filling": random.sample(FILLING, random.randint(1, 2)),
+        "filling": random.sample(FILLING, random.randint(1, min(2, max_ing - 2))),
         "cheese": random.choice(CHEESE),
     }
     filling_acc = [FILLING_ACC[f] for f in ingredients["filling"]]
@@ -180,8 +179,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             correct = False
         u = get_user(user_id)
         u["orders"] += 1
+        lvl = LEVELS[u["level"]]
         if correct:
-            reward = 20 * u["level"]
+            reward = lvl["reward"]
             u["balance"] += reward
             u["success"] += 1
             result_text = f"✅ **Заказ выполнен!**\n\nКлиент доволен 😊\nТы заработал: {reward} монет"
@@ -209,16 +209,54 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif data == "pizza_upgrades":
+        u = get_user(user_id)
+        lvl = LEVELS[u["level"]]
+        next_lvl = LEVELS.get(u["level"] + 1)
+        if next_lvl:
+            text = (
+                f"🏭 **РАЗВИТИЕ ПИЦЦЕРИИ**\n\n"
+                f"Текущий уровень: {lvl['name']}\n\n"
+                f"Следующий уровень: {next_lvl['name']}\n"
+                f"Цена: {next_lvl['price']} монет\n\n"
+                f"**Что даёт:**\n"
+                f"• {next_lvl['clients']} клиентов за раз\n"
+                f"• Заказ: {next_lvl['ingredients']} ингредиентов\n"
+                f"• Награда: {next_lvl['reward']} монет"
+            )
+            keyboard = [
+                [InlineKeyboardButton(f"💰 Улучшить за {next_lvl['price']}", callback_data="pizza_upgrade_buy")],
+                [InlineKeyboardButton("🔙 Назад", callback_data="pizza_menu")],
+            ]
+        else:
+            text = f"🏭 **РАЗВИТИЕ ПИЦЦЕРИИ**\n\nТы достиг максимального уровня: {lvl['name']}!"
+            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="pizza_menu")]]
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    elif data == "pizza_upgrade_buy":
+        u = get_user(user_id)
+        next_lvl = LEVELS.get(u["level"] + 1)
+        if not next_lvl:
+            await query.edit_message_text("Максимальный уровень достигнут.")
+            return
+        if u["balance"] < next_lvl["price"]:
+            await query.answer("Недостаточно монет!", show_alert=True)
+            return
+        u["balance"] -= next_lvl["price"]
+        u["level"] += 1
         await query.edit_message_text(
-            "🏭 **Улучшения**\n\n(Функция в разработке)",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="pizza_menu")]])
+            f"✅ Пиццерия улучшена до {next_lvl['name']}!\n\n"
+            f"Теперь ты можешь обслуживать {next_lvl['clients']} клиентов за раз.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 В меню пиццерии", callback_data="pizza_menu")]])
         )
 
     elif data == "pizza_stats":
         u = get_user(user_id)
         await query.edit_message_text(
-            f"📊 **Статистика**\n\n🍕 Всего заказов: {u['orders']}\n✅ Успешных: {u['success']}\n❌ Провальных: {u['fail']}\n💰 Заработано: {u['balance']} монет",
+            f"📊 **Статистика**\n\n"
+            f"🍕 Всего заказов: {u['orders']}\n"
+            f"✅ Успешных: {u['success']}\n"
+            f"❌ Провальных: {u['fail']}\n"
+            f"💰 Заработано: {u['balance']} монет",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="pizza_menu")]])
         )
