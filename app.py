@@ -207,10 +207,11 @@ def generate_order(user_id):
     u = get_user(user_id)
     lvl = LEVELS[u["level"]]
     max_ing = lvl["ingredients"]
+    max_fillings = max(1, min(2, max_ing - 2))
     ingredients = {
         "dough": random.choice(DOUGH),
         "sauce": random.choice(SAUCE),
-        "filling": random.sample(FILLING, random.randint(1, min(2, max_ing - 2))),
+        "filling": random.sample(FILLING, random.randint(1, max_fillings)),
         "cheese": random.choice(CHEESE),
     }
     filling_acc = [FILLING_ACC[f] for f in ingredients["filling"]]
