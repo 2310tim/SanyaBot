@@ -50,6 +50,9 @@ async def check_subscription(context, user_id):
         print(f"Ошибка проверки подписки: {e}")
         return False
 
+def is_bot_started(user_id):
+    return user_id in users
+
 settings = {}
 
 def get_settings(key):
@@ -601,6 +604,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cubs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    chat = update.effective_chat
+
+    if not is_bot_started(user_id):
+        bot_username = context.bot.username
+        await update.message.reply_text(
+            "⚠️ **Сначала запусти меня в личных сообщениях!**\n\n"
+            "Это нужно, чтобы я мог проверять твою подписку и сохранять прогресс.",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✉️ Открыть бота", url=f"https://t.me/{bot_username}?start=chat")]
+            ])
+        )
+        return
+
     if not await check_subscription(context, user_id):
         await update.message.reply_text(
             "🔔 **Для использования бота подпишись на канал:**\n\n"
@@ -609,9 +626,11 @@ async def cubs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=sub_menu()
         )
         return
-    if update.effective_chat.type == "private":
+
+    if chat.type == "private":
         await update.message.reply_text("❌ Игры доступны только в чате!")
         return
+
     message = update.message
     if message.reply_to_message:
         opponent = message.reply_to_message.from_user
@@ -755,15 +774,27 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             del promocodes[code]
         return
 
-    if not await check_subscription(context, user_id):
-        if text_lower in ["пицца", "пиццерия", "кубы", "кубики", "ии", "нейросеть", "топ"]:
+    if text_lower in ["пицца", "пиццерия", "кубы", "кубики", "ии", "нейросеть", "топ"]:
+        if not is_bot_started(user_id):
+            bot_username = context.bot.username
+            await update.message.reply_text(
+                "⚠️ **Сначала запусти меня в личных сообщениях!**\n\n"
+                "Это нужно, чтобы я мог проверять твою подписку и сохранять прогресс.",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✉️ Открыть бота", url=f"https://t.me/{bot_username}?start=chat")]
+                ])
+            )
+            return
+
+        if not await check_subscription(context, user_id):
             await update.message.reply_text(
                 "🔔 **Для использования бота подпишись на канал:**\n\n"
                 f"📢 [{CHANNEL_ID}](https://t.me/{CHANNEL_ID.replace('@', '')})",
                 parse_mode="Markdown",
                 reply_markup=sub_menu()
             )
-        return
+            return
 
     if text_lower in ["пицца", "пиццерия"]:
         await update.message.reply_text(pizza_text(user_id), parse_mode="Markdown", reply_markup=pizza_menu(user_id))
