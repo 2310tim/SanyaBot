@@ -18,6 +18,10 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 if not ADMIN_ID:
     raise ValueError("ADMIN_ID не найден")
 
+CHANNEL_ID = os.getenv("CHANNEL_ID")
+if not CHANNEL_ID:
+    raise ValueError("CHANNEL_ID не найден")
+
 client = OpenAI(
     base_url="https://apimira.com/v1",
     api_key=DEEPSEEK_KEY,
@@ -37,6 +41,14 @@ def is_premium(u):
     if not u.get("premium_until"):
         return False
     return datetime.now() < u["premium_until"]
+
+async def check_subscription(context, user_id):
+    try:
+        member = await context.bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
+        return member.status in ["member", "administrator", "creator"]
+    except Exception as e:
+        print(f"Ошибка проверки подписки: {e}")
+        return False
 
 settings = {}
 
@@ -93,6 +105,12 @@ def ai_menu(chat):
         [InlineKeyboardButton(f"{mat_icon} Маты", callback_data="ai_toggle_mat")],
         [InlineKeyboardButton(f"{emoji_icon} Смайлики", callback_data="ai_toggle_emoji")],
         [InlineKeyboardButton("🔙 Назад", callback_data="back_main")],
+    ])
+
+def sub_menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📢 Подписаться", url=f"https://t.me/{CHANNEL_ID.replace('@', '')}")],
+        [InlineKeyboardButton("✅ Я подписался", callback_data="check_sub")],
     ])
 
 users = {}
@@ -209,12 +227,32 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     u = get_user(user_id)
     u["name"] = update.effective_user.first_name or "Без имени"
+
+    if not await check_subscription(context, user_id):
+        await update.message.reply_text(
+            "🔔 **Для использования бота подпишись на канал:**\n\n"
+            f"📢 [{CHANNEL_ID}](https://t.me/{CHANNEL_ID.replace('@', '')})\n\n"
+            "После подписки нажми «✅ Я подписался».",
+            parse_mode="Markdown",
+            reply_markup=sub_menu()
+        )
+        return
+
     await update.message.reply_text(
         "👋 Здравствуйте!\n\nВыберите действие:",
         reply_markup=main_menu(context.bot.username, user_id)
     )
 
 async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not await check_subscription(context, user_id):
+        await update.message.reply_text(
+            "🔔 **Для использования бота подпишись на канал:**\n\n"
+            f"📢 [{CHANNEL_ID}](https://t.me/{CHANNEL_ID.replace('@', '')})",
+            parse_mode="Markdown",
+            reply_markup=sub_menu()
+        )
+        return
     await update.message.reply_text("🤖 Настройки ИИ:", reply_markup=ai_menu(update.effective_chat))
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -224,6 +262,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat = update.effective_chat
     u = get_user(user_id)
+
+    if data == "check_sub":
+        if await check_subscription(context, user_id):
+            await query.edit_message_text(
+                "✅ Подписка подтверждена!\n\nВыберите действие:",
+                reply_markup=main_menu(context.bot.username, user_id)
+            )
+        else:
+            await query.answer("❌ Ты ещё не подписался!", show_alert=True)
+        return
+
+    if not await check_subscription(context, user_id):
+        await query.edit_message_text(
+            "🔔 **Для использования бота подпишись на канал:**\n\n"
+            f"📢 [{CHANNEL_ID}](https://t.me/{CHANNEL_ID.replace('@', '')})",
+            parse_mode="Markdown",
+            reply_markup=sub_menu()
+        )
+        return
 
     if data == "ai":
         await query.edit_message_text("🤖 Настройки ИИ:", reply_markup=ai_menu(chat))
@@ -415,10 +472,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             "➕ **Создание промокода**\n\n"
             "Отправь сообщение в формате:\n"
-            "`КОД сумма количество`\n\n"
-            "Например: `SANYA 100 5`\n\n"
-            "Это значит: промокод SANYA даст 100 монет, 5 активаций.\n"
-            "С твоего баланса спишется 500 монет.",
+            "`КОД сумма`\n\n"
+            "Например: `SANYA 100`\n\n"
+            "Это значит: промокод SANYA даст 100 монет.\n"
+            "Промокод можно активировать 1 раз.\n"
+            "С твоего баланса спишется 100 монет.",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="promo_menu")]])
         )
@@ -542,10 +600,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer()
 
 async def cubs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not await check_subscription(context, user_id):
+        await update.message.reply_text(
+            "🔔 **Для использования бота подпишись на канал:**\n\n"
+            f"📢 [{CHANNEL_ID}](https://t.me/{CHANNEL_ID.replace('@', '')})",
+            parse_mode="Markdown",
+            reply_markup=sub_menu()
+        )
+        return
     if update.effective_chat.type == "private":
         await update.message.reply_text("❌ Игры доступны только в чате!")
         return
-    user_id = update.effective_user.id
     message = update.message
     if message.reply_to_message:
         opponent = message.reply_to_message.from_user
@@ -652,15 +718,14 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parts = text_lower.split()
             code = parts[0].upper()
             amount = int(parts[1])
-            uses = int(parts[2])
-            total = amount * uses
-            if u["balance"] < total:
-                await update.message.reply_text(f"❌ Недостаточно монет! Нужно {format_money(total)}, у тебя {format_money(u['balance'])}.")
+            uses = 1
+            if u["balance"] < amount:
+                await update.message.reply_text(f"❌ Недостаточно монет! Нужно {format_money(amount)}, у тебя {format_money(u['balance'])}.")
                 context.user_data.pop("promo_create", None)
                 return
-            u["balance"] -= total
+            u["balance"] -= amount
             promocodes[code] = {"type": "money", "value": amount, "uses": uses}
-            await update.message.reply_text(f"✅ Промокод {code} создан: {format_money(amount)} монет, {uses} активаций. Списано {format_money(total)} монет.")
+            await update.message.reply_text(f"✅ Промокод {code} создан: {format_money(amount)} монет, 1 активация. Списано {format_money(amount)} монет.")
             context.user_data.pop("promo_create", None)
         except Exception as e:
             await update.message.reply_text(f"❌ Ошибка: {e}")
@@ -669,6 +734,14 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     code = text.upper()
     if code in promocodes:
+        if not await check_subscription(context, user_id):
+            await update.message.reply_text(
+                "🔔 **Для активации промокода подпишись на канал:**\n\n"
+                f"📢 [{CHANNEL_ID}](https://t.me/{CHANNEL_ID.replace('@', '')})",
+                parse_mode="Markdown",
+                reply_markup=sub_menu()
+            )
+            return
         p = promocodes[code]
         if p["type"] == "money":
             u["balance"] += p["value"]
@@ -680,6 +753,16 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         p["uses"] -= 1
         if p["uses"] <= 0:
             del promocodes[code]
+        return
+
+    if not await check_subscription(context, user_id):
+        if text_lower in ["пицца", "пиццерия", "кубы", "кубики", "ии", "нейросеть", "топ"]:
+            await update.message.reply_text(
+                "🔔 **Для использования бота подпишись на канал:**\n\n"
+                f"📢 [{CHANNEL_ID}](https://t.me/{CHANNEL_ID.replace('@', '')})",
+                parse_mode="Markdown",
+                reply_markup=sub_menu()
+            )
         return
 
     if text_lower in ["пицца", "пиццерия"]:
