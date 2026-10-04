@@ -64,7 +64,7 @@ def generate_order(user_id):
     order_text = (
         f"🍕 **КЛИЕНТ ГОВОРИТ:**\n\n"
         f"«Хочу пиццу на {DOUGH_ACC[ingredients['dough']]} тесте, "
-        f"с {SAUCE_ACC[ingredients['sauce']]}, "
+        f"с {SAUCE_ACC[ingredients['sauce']]} соусом, "
         f"{', '.join(filling_acc)} "
         f"и {CHEESE_ACC[ingredients['cheese']]}»"
     )
